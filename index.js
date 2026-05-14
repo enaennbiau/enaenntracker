@@ -12,38 +12,40 @@
 
 'use strict';
 
-// ─── IMPORTS ──────────────────────────────────────────────────────────────────
+// ─── STATIC IMPORTS ───────────────────────────────────────────────────────────
+// Only exports confirmed stable across ST versions.
+// addOneMessage is loaded dynamically in init() to avoid crash-on-missing-export.
 
 import {
     eventSource,
     event_types,
     saveSettingsDebounced,
     chat,
-    addOneMessage,
-    saveChatConditionally,
 } from '../../../../script.js';
 
 import {
     extension_settings,
 } from '../../../extensions.js';
 
+// Filled in during init via dynamic import (safe — returns undefined if not exported)
+let _addOneMessage = null;
+
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const MODULE_NAME  = 'enaennTracker';
-const TRACKER_FLAG = 'enaenn_tracker'; // key stored in message.extra to identify tracker messages
+const TRACKER_FLAG = 'enaenn_tracker';
 
 const DEFAULT_SETTINGS = {
     enabled:            true,
     autoUpdate:         true,
-    profiles:           [],   // { name, endpoint, apiKey, model }[]
+    profiles:           [],
     activeProfileIndex: -1,
-    lastTracker:        '',   // raw content of the most recent tracker output
-    contextMessages:    20,   // how many recent roleplay messages to send to tracker API
-    windowSize:         7,    // how many tracker snapshots the main model sees in full
+    lastTracker:        '',
+    contextMessages:    20,
+    windowSize:         7,
 };
 
 // ─── TRACKER SYSTEM PROMPT ────────────────────────────────────────────────────
-// Sent ONLY to your tracker API. The main roleplay model never sees this.
 
 const TRACKER_SYSTEM_PROMPT = `You are a silent background tracker for a collaborative roleplay session. Your ONLY job is to read the previous tracker state and the most recent chat messages, then output an updated tracker block.
 
@@ -126,14 +128,13 @@ RELATIONSHIP MATRIX RULES:
   Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
   Choose feeling words as the AGENT would define them.`;
 
-// ─── SETTINGS HELPERS ─────────────────────────────────────────────────────────
+// ─── SETTINGS ─────────────────────────────────────────────────────────────────
 
 function initSettings() {
     if (!extension_settings[MODULE_NAME]) {
         extension_settings[MODULE_NAME] = { ...DEFAULT_SETTINGS };
         return;
     }
-    // Fill in any keys added in future versions
     for (const [key, val] of Object.entries(DEFAULT_SETTINGS)) {
         if (extension_settings[MODULE_NAME][key] === undefined) {
             extension_settings[MODULE_NAME][key] = val;
@@ -141,14 +142,11 @@ function initSettings() {
     }
 }
 
-/** Quick reference to settings object */
-const S = () => extension_settings[MODULE_NAME];
-
-/** Merge-patch and debounce-save */
-function save(patch = {}) {
+const S    = () => extension_settings[MODULE_NAME];
+const save = (patch = {}) => {
     Object.assign(extension_settings[MODULE_NAME], patch);
     saveSettingsDebounced();
-}
+};
 
 function getActiveProfile() {
     const idx = S().activeProfileIndex;
@@ -158,7 +156,6 @@ function getActiveProfile() {
 
 // ─── CHAT / WINDOW HELPERS ────────────────────────────────────────────────────
 
-/** Returns the chat indices of all tracker messages, oldest first */
 function getTrackerIndices() {
     return chat
         .map((m, i) => ({ m, i }))
@@ -166,72 +163,37 @@ function getTrackerIndices() {
         .map(({ i }) => i);
 }
 
-/** Collapse a tracker message to the archived placeholder */
 function archiveTrackerAt(idx) {
     const m = chat[idx];
     if (!m || m.extra?.archived) return;
-
-    // Preserve full content before overwriting
-    if (!m.extra.fullContent) {
-        m.extra.fullContent = m.mes;
-    }
+    if (!m.extra.fullContent) m.extra.fullContent = m.mes;
     m.extra.archived = true;
     m.mes = '<div class="enaenn-tracker-archived">📋 <em>[archived tracker]</em></div>';
-
-    // Update the DOM element if it is currently rendered
     $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
 }
 
-/** Restore an archived tracker message to its full content */
 function restoreTrackerAt(idx) {
     const m = chat[idx];
     if (!m || !m.extra?.archived) return;
-
     m.mes = m.extra.fullContent || m.mes;
     m.extra.archived = false;
-
     $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
 }
 
-/**
- * Enforce the sliding window.
- * The newest `windowSize` tracker messages stay at full content.
- * Everything older is archived to a tiny placeholder.
- */
 async function enforceWindow() {
-    const windowSize = S().windowSize;
-    const indices    = getTrackerIndices();
+    const indices   = getTrackerIndices();
     if (indices.length === 0) return;
-
-    const cutoff   = Math.max(0, indices.length - windowSize);
+    const cutoff    = Math.max(0, indices.length - S().windowSize);
     const toArchive = indices.slice(0, cutoff);
     const toRestore = indices.slice(cutoff);
-
-    let changed = false;
-
-    for (const idx of toArchive) {
-        if (!chat[idx]?.extra?.archived) {
-            archiveTrackerAt(idx);
-            changed = true;
-        }
-    }
-    for (const idx of toRestore) {
-        if (chat[idx]?.extra?.archived) {
-            restoreTrackerAt(idx);
-            changed = true;
-        }
-    }
-
-    if (changed) {
-        await saveChatConditionally();
-    }
+    for (const idx of toArchive) { if (!chat[idx]?.extra?.archived) archiveTrackerAt(idx); }
+    for (const idx of toRestore) { if (chat[idx]?.extra?.archived)  restoreTrackerAt(idx); }
 }
 
 // ─── TRACKER API CALL ─────────────────────────────────────────────────────────
 
 async function callTrackerAPI() {
     const profile = getActiveProfile();
-
     if (!profile) {
         toastr.warning('enaennTracker: No API profile selected. Open Extensions → enaennTracker.');
         return null;
@@ -241,8 +203,6 @@ async function callTrackerAPI() {
         return null;
     }
 
-    // Collect recent ROLEPLAY messages only — tracker messages are excluded
-    // so the tracker API gets clean story context, not its own previous outputs.
     const recentRoleplay = chat
         .filter(m => !m.extra?.[TRACKER_FLAG])
         .slice(-(S().contextMessages));
@@ -298,7 +258,6 @@ async function callTrackerAPI() {
 // ─── INSERT TRACKER MESSAGE ───────────────────────────────────────────────────
 
 async function insertTrackerMessage(content) {
-    // Guarantee our wrapper div is present
     const wrapped = content.includes('enaenn-tracker-block')
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
@@ -310,32 +269,39 @@ async function insertTrackerMessage(content) {
         mes:       wrapped,
         send_date: new Date().toLocaleString(),
         extra: {
-            [TRACKER_FLAG]: true,   // marks this as a tracker message
-            fullContent:   wrapped, // always kept so we can restore from archive
-            archived:      false,
-            token_count:   0,
+            [TRACKER_FLAG]: true,
+            fullContent:    wrapped,
+            archived:       false,
+            token_count:    0,
         },
     };
 
     chat.push(mesObj);
+    const mesId = chat.length - 1;
 
-    // Ask ST to render the message into the DOM
-    try {
-        await addOneMessage(mesObj, { scroll: true, type: 'narrator' });
-    } catch (e) {
-        // Fallback: manual DOM injection if addOneMessage is unavailable
-        console.warn('[enaennTracker] addOneMessage unavailable, using fallback:', e);
-        const mesId = chat.length - 1;
-        $('#chat').append(`
-            <div class="mes" mesid="${mesId}">
-                <div class="mes_block">
-                    <div class="name_text">Tracker</div>
-                    <div class="mes_text">${wrapped}</div>
-                </div>
-            </div>`);
+    // Try ST's addOneMessage first (loaded dynamically — null if unavailable)
+    if (_addOneMessage) {
+        try {
+            await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
+            return;
+        } catch (e) {
+            console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
+        }
     }
 
-    await saveChatConditionally();
+    // DOM fallback
+    $('#chat').append(`
+        <div class="mes" mesid="${mesId}" is_system="false">
+            <div class="mes_block">
+                <div class="ch_name">
+                    <span class="name_text">Tracker</span>
+                </div>
+                <div class="mes_text">${wrapped}</div>
+            </div>
+        </div>
+    `);
+    const $chat = $('#chat');
+    $chat.scrollTop($chat[0].scrollHeight);
 }
 
 // ─── MAIN UPDATE FLOW ─────────────────────────────────────────────────────────
@@ -360,13 +326,8 @@ async function updateTracker() {
         ? result
         : `<div class="enaenn-tracker-block">${result}</div>`;
 
-    // Persist latest tracker content (used as "previous state" on next call)
     save({ lastTracker: wrapped });
-
-    // Insert as a new chat message
     await insertTrackerMessage(wrapped);
-
-    // Archive old tracker snapshots beyond the window
     await enforceWindow();
 
     toastr.success('Tracker updated!', '', { timeOut: 1500 });
@@ -387,11 +348,8 @@ function refreshProfileSelect() {
     const $sel = $('#enaennTracker_profileSelect')
         .empty()
         .append('<option value="-1">— Select a profile —</option>');
-
     S().profiles.forEach((p, i) => {
-        $sel.append(
-            `<option value="${i}"${i === S().activeProfileIndex ? ' selected' : ''}>${p.name || 'Unnamed'}</option>`
-        );
+        $sel.append(`<option value="${i}"${i === S().activeProfileIndex ? ' selected' : ''}>${p.name || 'Unnamed'}</option>`);
     });
 }
 
@@ -409,8 +367,6 @@ function refreshProfileEditor() {
     $('#enaennTracker_profileEditor').slideDown(150);
 }
 
-// ─── SETTINGS HTML ────────────────────────────────────────────────────────────
-
 const SETTINGS_HTML = `
 <div id="enaennTracker_root" class="extension_settings">
   <div class="inline-drawer">
@@ -420,7 +376,6 @@ const SETTINGS_HTML = `
     </div>
     <div class="inline-drawer-content">
 
-      <!-- Enabled / Auto-update toggles -->
       <div class="flex-container flexGap5 enaenn-gap">
         <label class="checkbox_label">
           <input type="checkbox" id="enaennTracker_enabled" />
@@ -432,28 +387,19 @@ const SETTINGS_HTML = `
         </label>
       </div>
 
-      <!-- Context size -->
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
-        <label style="white-space:nowrap; min-width:175px;">
-          Roleplay messages → tracker API:
-        </label>
-        <input type="number" id="enaennTracker_ctxSize"
-               min="5" max="100" class="text_pole" style="width:60px;" />
+        <label style="white-space:nowrap; min-width:175px;">Roleplay messages → tracker API:</label>
+        <input type="number" id="enaennTracker_ctxSize" min="5" max="100" class="text_pole" style="width:60px;" />
       </div>
 
-      <!-- Window size -->
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
-        <label style="white-space:nowrap; min-width:175px;">
-          Tracker snapshots visible to model:
-        </label>
-        <input type="number" id="enaennTracker_windowSize"
-               min="1" max="50" class="text_pole" style="width:60px;" />
+        <label style="white-space:nowrap; min-width:175px;">Tracker snapshots visible to model:</label>
+        <input type="number" id="enaennTracker_windowSize" min="1" max="50" class="text_pole" style="width:60px;" />
         <span style="font-size:0.78em; opacity:0.5;">(older ones archived)</span>
       </div>
 
       <hr />
 
-      <!-- API Profiles -->
       <div class="enaenn-gap" style="font-weight:bold;">API Profiles</div>
       <div class="flex-container flexGap5 enaenn-gap">
         <select id="enaennTracker_profileSelect" class="text_pole flex1"></select>
@@ -471,47 +417,27 @@ const SETTINGS_HTML = `
         <input type="password" id="enaennTracker_pKey"      class="text_pole" placeholder="sk-..." />
         <label>Model name</label>
         <input type="text"     id="enaennTracker_pModel"    class="text_pole" placeholder="gpt-4o-mini" />
-        <button id="enaennTracker_saveProfile" class="menu_button" style="margin-top:8px;">
-          💾 Save Profile
-        </button>
+        <button id="enaennTracker_saveProfile" class="menu_button" style="margin-top:8px;">💾 Save Profile</button>
       </div>
 
       <hr />
 
-      <!-- Actions -->
       <div class="flex-container flexGap5">
-        <button id="enaennTracker_refreshBtn" class="menu_button flex1">
-          🔄 Refresh Tracker
-        </button>
-        <button id="enaennTracker_clearBtn" class="menu_button"
-                title="Clears the saved tracker state. Next refresh will start fresh.">
-          🗑️ Clear State
-        </button>
+        <button id="enaennTracker_refreshBtn" class="menu_button flex1">🔄 Refresh Tracker</button>
+        <button id="enaennTracker_clearBtn"   class="menu_button" title="Clears saved tracker state. Next refresh starts fresh.">🗑️ Clear State</button>
       </div>
 
     </div>
   </div>
 </div>`;
 
-// ─── EVENT BINDINGS ───────────────────────────────────────────────────────────
-
 function bindUI() {
-    $('#enaennTracker_enabled').on('change', function () {
-        save({ enabled: this.checked });
-    });
-
-    $('#enaennTracker_autoUpdate').on('change', function () {
-        save({ autoUpdate: this.checked });
-    });
-
-    $('#enaennTracker_ctxSize').on('change', function () {
-        save({ contextMessages: Math.max(5, parseInt(this.value) || 20) });
-    });
-
+    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
+    $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
+    $('#enaennTracker_ctxSize').on('change',    function () { save({ contextMessages: Math.max(5,  parseInt(this.value) || 20) }); });
     $('#enaennTracker_windowSize').on('change', function () {
         const v = Math.max(1, parseInt(this.value) || 7);
         save({ windowSize: v });
-        // Re-apply the window immediately when the setting changes
         enforceWindow();
     });
 
@@ -553,7 +479,6 @@ function bindUI() {
     });
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
-
     $('#enaennTracker_clearBtn').on('click', () => {
         save({ lastTracker: '' });
         toastr.info('Tracker state cleared. Next refresh will start fresh.');
@@ -561,12 +486,8 @@ function bindUI() {
 }
 
 function addToolbarButton() {
-    if ($('#enaennTracker_toolbarBtn').length) return; // prevent duplicates on hot-reload
-    const $btn = $(`
-        <div id="enaennTracker_toolbarBtn"
-             title="Refresh enaennTracker"
-             class="interactable">🔄</div>
-    `);
+    if ($('#enaennTracker_toolbarBtn').length) return;
+    const $btn = $(`<div id="enaennTracker_toolbarBtn" title="Refresh enaennTracker" class="interactable">🔄</div>`);
     $btn.on('click', () => updateTracker());
     $('#send_but_sheld').prepend($btn);
 }
@@ -576,11 +497,20 @@ function addToolbarButton() {
 jQuery(async () => {
     initSettings();
 
-    // Inject settings panel into ST's extensions drawer
+    // Try to load addOneMessage dynamically — safe, won't crash if missing
+    try {
+        const mod = await import('../../../../script.js');
+        _addOneMessage = mod.addOneMessage ?? null;
+        console.log(_addOneMessage
+            ? '[enaennTracker] addOneMessage loaded.'
+            : '[enaennTracker] addOneMessage not found, using DOM fallback.');
+    } catch (e) {
+        console.warn('[enaennTracker] Dynamic import failed:', e);
+    }
+
     $('#extensions_settings2').append(SETTINGS_HTML);
 
-    // Restore saved values into the UI
-    $('#enaennTracker_enabled').prop('checked',  S().enabled);
+    $('#enaennTracker_enabled').prop('checked',   S().enabled);
     $('#enaennTracker_autoUpdate').prop('checked', S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
     $('#enaennTracker_windowSize').val(S().windowSize);
@@ -590,20 +520,13 @@ jQuery(async () => {
     bindUI();
     addToolbarButton();
 
-    // ── ST event hooks ────────────────────────────────────────────────────────
-
-    // Auto-update after the AI finishes generating a reply
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (S().enabled && S().autoUpdate) {
-            // Small delay so ST finishes appending the message before we read it
             await new Promise(r => setTimeout(r, 700));
             await updateTracker();
         }
     });
 
-    // When the chat changes (new chat, different character, page reload into a different chat):
-    // - Clear the saved tracker state so the new chat starts fresh
-    // - Re-enforce the window on whatever tracker messages are in the newly loaded chat
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         save({ lastTracker: '' });
         await enforceWindow();
