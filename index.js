@@ -17,7 +17,6 @@
 import {
     eventSource,
     event_types,
-    getContext,
     saveSettingsDebounced,
     chat,
     addOneMessage,
