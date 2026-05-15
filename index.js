@@ -246,11 +246,7 @@ function archiveTrackerAt(idx) {
     if (!m.extra.fullContent) m.extra.fullContent = m.mes;
     m.extra.archived = true;
     m.mes = '<div class="enaenn-tracker-archived">📋 <em>[archived tracker]</em></div>';
-    // Use last-resort DOM query — mesid may not always match index exactly
-    const $el = $(`#chat .mes[mesid="${idx}"]`);
-    if ($el.length) {
-        $el.find('.mes_text').html(m.mes);
-    }
+    $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
 }
 
 function restoreTrackerAt(idx) {
@@ -258,14 +254,11 @@ function restoreTrackerAt(idx) {
     if (!m || !m.extra?.archived) return;
     m.mes = m.extra.fullContent || m.mes;
     m.extra.archived = false;
-    const $el = $(`#chat .mes[mesid="${idx}"]`);
-    if ($el.length) {
-        $el.find('.mes_text').html(m.mes);
-    }
+    $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
 }
 
 async function enforceWindow() {
-    const indices = getTrackerIndices();
+    const indices   = getTrackerIndices();
     if (indices.length === 0) return;
     const cutoff    = Math.max(0, indices.length - S().windowSize);
     const toArchive = indices.slice(0, cutoff);
@@ -287,7 +280,6 @@ async function callTrackerAPI() {
         return null;
     }
 
-    // Roleplay messages only — tracker messages excluded so the API gets clean story context
     const recentRoleplay = chat
         .filter(m => !m.extra?.[TRACKER_FLAG])
         .slice(-(S().contextMessages));
@@ -297,71 +289,33 @@ async function callTrackerAPI() {
         .join('\n\n');
 
     const prevState = S().lastTracker
-        ? `PREVIOUS TRACKER STATE (HTML card):\n${S().lastTracker}`
-        : 'No previous tracker state. Initialize fresh from the chat context.';
+        ? `PREVIOUS TRACKER STATE:\n${S().lastTracker}`
+        : 'No previous tracker state. Initialize a fresh one from the chat context.';
 
     const userMessage =
         `${prevState}\n\n---\n\n` +
         `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
-        `Output the updated tracker card. HTML only, nothing else.`;
+        `Output the updated tracker wrapped in <div class="enaenn-tracker-block">...</div>. Nothing else.`;
 
-    // Route through ST's CORS proxy so the request is made server-side.
-    // This fixes Safari on iOS blocking direct fetch() to local/Tailscale
-    // HTTP addresses ("Load failed").
-    //
-    // ST's proxy format:  GET/POST /proxy/<encoded-target-url>
-    // All ST API calls require getRequestHeaders() which injects the CSRF
-    // token automatically — that's what was causing the 403 Forbidden.
     try {
-        const base       = profile.endpoint.replace(/\/+$/, '');
-        const targetUrl  = `${base}/chat/completions`;
-
-        const trackerPayload = {
-            model:       profile.model,
-            messages: [
-                { role: 'system', content: TRACKER_SYSTEM_PROMPT },
-                { role: 'user',   content: userMessage },
-            ],
-            max_tokens:  2000,
-            temperature: 0.2,
-            stream:      false,
-        };
-
-        // getRequestHeaders() provides Content-Type + X-CSRF-Token + session
-        // cookie automatically — required for every ST backend endpoint.
-        const stHeaders = {
-            ...getRequestHeaders(),
-            // Forward the tracker API key if provided
-            ...(profile.apiKey ? { 'X-ST-Proxy-Authorization': `Bearer ${profile.apiKey}` } : {}),
-        };
-
-        // ST's CORS proxy: /proxy/<url-encoded target>
-        // The server fetches the target URL and streams the response back.
-        let response = await fetch(`/proxy/${encodeURIComponent(targetUrl)}`, {
+        const base     = profile.endpoint.replace(/\/+$/, '');
+        const response = await fetch(`${base}/chat/completions`, {
             method:  'POST',
             headers: {
-                ...stHeaders,
-                // Override content-type for the proxied body
                 'Content-Type': 'application/json',
-                // Pass the API key in the standard header for the proxy to forward
-                ...(profile.apiKey ? { 'Authorization': `Bearer ${profile.apiKey}` } : {}),
+                ...(profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {}),
             },
-            body: JSON.stringify(trackerPayload),
+            body: JSON.stringify({
+                model:       profile.model,
+                messages: [
+                    { role: 'system', content: TRACKER_SYSTEM_PROMPT },
+                    { role: 'user',   content: userMessage },
+                ],
+                max_tokens:  1500,
+                temperature: 0.2,
+                stream:      false,
+            }),
         });
-
-        // If proxy returns 404 (older ST build without CORS proxy), fall back
-        // to a direct fetch. This will work on desktop but may fail on iOS Safari.
-        if (response.status === 404) {
-            console.warn('[enaennTracker] /proxy/ not available, falling back to direct fetch (may fail on iOS Safari).');
-            response = await fetch(targetUrl, {
-                method:  'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {}),
-                },
-                body: JSON.stringify(trackerPayload),
-            });
-        }
 
         if (!response.ok) {
             const errText = await response.text();
@@ -381,24 +335,19 @@ async function callTrackerAPI() {
 // ─── INSERT TRACKER MESSAGE ───────────────────────────────────────────────────
 
 async function insertTrackerMessage(content) {
-    // Ensure our wrapper div is present (the API might occasionally omit it)
     const wrapped = content.includes('enaenn-tracker-block')
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
 
-    // is_system: false → keeps the tracker visible to the AI in context.
-    // mes is a plain whitespace placeholder so ST's messageFormatting() never
-    // escapes the real HTML. We inject the real HTML into the DOM ourselves
-    // after addOneMessage has finished rendering.
     const mesObj = {
         name:      'Tracker',
         is_user:   false,
-        is_system: false,
-        mes:       ' ',          // plain whitespace placeholder — never shown
+        is_system: true,
+        mes:       wrapped,
         send_date: new Date().toLocaleString(),
         extra: {
             [TRACKER_FLAG]: true,
-            fullContent:    wrapped,  // real HTML kept here
+            fullContent:    wrapped,
             archived:       false,
             token_count:    0,
         },
@@ -407,38 +356,35 @@ async function insertTrackerMessage(content) {
     chat.push(mesObj);
     const mesId = chat.length - 1;
 
-    try {
-        // FIX #2: Use statically-imported addOneMessage (no dynamic re-import needed)
-        await addOneMessage(mesObj, { scroll: true, type: 'narrator' });
-
-        // FIX #3: After ST renders the placeholder, replace .mes_text with real HTML.
-        // Use .last() as a reliable fallback in case mesid attribute lags behind.
-        const $byId   = $(`#chat .mes[mesid="${mesId}"]`);
-        const $target = $byId.length ? $byId : $('#chat .mes').last();
-        $target.find('.mes_text').html(wrapped);
-
-        // Scroll to bottom after HTML injection
-        const $chat = $('#chat');
-        $chat.scrollTop($chat[0].scrollHeight);
-        return;
-
-    } catch (e) {
-        console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
+    // Try ST's addOneMessage first (loaded dynamically — null if unavailable)
+    if (_addOneMessage) {
+        try {
+            await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
+            const $target = $byId.length ? $byId : $('#chat .mes').last();
+            $target.find('.mes_text').html(wrapped);
+            // Scroll to bottom after HTML injection
+            const $chat = $('#chat');
+            $chat.scrollTop($chat[0].scrollHeight);
+            return;
+            
+        } catch (e) {
+            console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
+        }
     }
 
-    // ── DOM fallback (if addOneMessage is unavailable or throws) ──────────────
+    // DOM fallback
     $('#chat').append(`
-        <div class="mes" mesid="${mesId}" is_system="true">
+        <div class="mes" mesid="${mesId}" is_system="false">
             <div class="mes_block">
-                <div class="ch_name"><span class="name_text">Tracker</span></div>
-                <div class="mes_text"></div>
+                <div class="ch_name">
+                    <span class="name_text">Tracker</span>
+                </div>
+                <div class="mes_text">${wrapped}</div>
             </div>
         </div>
     `);
-    // FIX #1 (fallback): inject HTML via .html(), never via template literal
-    // so it is parsed as DOM nodes, not escaped text.
     $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(wrapped);
-
+    
     const $chat = $('#chat');
     $chat.scrollTop($chat[0].scrollHeight);
 }
@@ -465,9 +411,7 @@ async function updateTracker() {
         ? result
         : `<div class="enaenn-tracker-block">${result}</div>`;
 
-    // Save as "previous state" for the next API call
     save({ lastTracker: wrapped });
-
     await insertTrackerMessage(wrapped);
     await enforceWindow();
 
@@ -638,11 +582,16 @@ function addToolbarButton() {
 jQuery(async () => {
     initSettings();
 
-    // FIX #4: addOneMessage is now statically imported — no dynamic re-import needed.
-    // Just log whether it was successfully resolved.
-    console.log(typeof addOneMessage === 'function'
-        ? '[enaennTracker] addOneMessage loaded via static import.'
-        : '[enaennTracker] WARNING: addOneMessage is not a function — DOM fallback will be used.');
+    // Try to load addOneMessage dynamically — safe, won't crash if missing
+    try {
+        const mod = await import('../../../../script.js');
+        _addOneMessage = mod.addOneMessage ?? null;
+        console.log(_addOneMessage
+            ? '[enaennTracker] addOneMessage loaded.'
+            : '[enaennTracker] addOneMessage not found, using DOM fallback.');
+    } catch (e) {
+        console.warn('[enaennTracker] Dynamic import failed:', e);
+    }
 
     $('#extensions_settings2').append(SETTINGS_HTML);
 
@@ -656,7 +605,6 @@ jQuery(async () => {
     bindUI();
     addToolbarButton();
 
-    // Auto-update after each AI reply
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (S().enabled && S().autoUpdate) {
             await new Promise(r => setTimeout(r, 700));
@@ -664,7 +612,6 @@ jQuery(async () => {
         }
     });
 
-    // On chat change: clear saved state so the new chat starts fresh
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         save({ lastTracker: '' });
         await enforceWindow();
