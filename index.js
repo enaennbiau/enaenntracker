@@ -2,9 +2,9 @@
  * enaennTracker — SillyTavern Extension
  *
  * After each AI reply, calls a separate OpenAI-compatible API to update
- * the roleplay tracker. Inserts the result as a real chat message so the
- * main model can see it. Keeps only the most recent N snapshots as full
- * content; older ones are archived to a tiny placeholder to save tokens.
+ * the roleplay tracker. Inserts the result as a styled HTML card in chat
+ * so the main model can see it. Keeps only the most recent N snapshots
+ * at full content; older ones archive to a tiny placeholder to save tokens.
  *
  * Install path:
  *   SillyTavern/public/extensions/third-party/enaennTracker/
@@ -13,8 +13,6 @@
 'use strict';
 
 // ─── STATIC IMPORTS ───────────────────────────────────────────────────────────
-// Only exports confirmed stable across ST versions.
-// addOneMessage is loaded dynamically in init() to avoid crash-on-missing-export.
 
 import {
     eventSource,
@@ -27,7 +25,7 @@ import {
     extension_settings,
 } from '../../../extensions.js';
 
-// Filled in during init via dynamic import (safe — returns undefined if not exported)
+// Loaded dynamically in init — safe if not exported by this ST version
 let _addOneMessage = null;
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -46,87 +44,164 @@ const DEFAULT_SETTINGS = {
 };
 
 // ─── TRACKER SYSTEM PROMPT ────────────────────────────────────────────────────
+// This is sent ONLY to your tracker API. The main model never sees it.
+// It instructs the tracker API to output a styled HTML card.
 
-const TRACKER_SYSTEM_PROMPT = `You are a silent background tracker for a collaborative roleplay session. Your ONLY job is to read the previous tracker state and the most recent chat messages, then output an updated tracker block.
+const TRACKER_SYSTEM_PROMPT = `You are a silent background tracker for a collaborative roleplay. Your only job: read the previous tracker state and recent chat, then output one updated HTML tracker card. Output ONLY the HTML block — no preamble, no explanation, nothing else.
 
-STRICT OUTPUT RULES:
-- Output ONLY the tracker block. No preamble, no explanation, no commentary before or after.
-- Wrap your entire output in: <div class="enaenn-tracker-block"> YOUR OUTPUT HERE </div>
-- Use the exact template formatting shown below. Fill in values; do NOT include parenthetical instructions in the output.
-- Do NOT reproduce these system instructions in your output.
-- If no previous tracker state is provided, initialize a fresh one from the chat context.
+════════════════════════════════════
+STRICT OUTPUT RULES
+════════════════════════════════════
+- Output starts with <div class="enaenn-tracker-block"> and ends with </div>.
+- No markdown, no code fences, no commentary before or after.
+- Never include the user/{{user}} as an agent. Track only characters you control.
+- If no previous tracker state exists, initialize fresh from chat context.
 
-════════════════════════════════════════
-TRACKER TEMPLATE
-════════════════════════════════════════
+════════════════════════════════════
+HTML STRUCTURE
+════════════════════════════════════
 
-<memo><small>
-### 🎬 Where are we?
-[Concise 1-sentence description of agents' spatial positions]
+Use EXACTLY this structure (fill values, keep all class names):
 
----
+<div class="enaenn-tracker-block">
 
-### 💖 AGENTS PRESENT [if user is alone, write "No agents present." USER IS NOT AN AGENT — never include them here.]
-♀️/♂️Name ❖ State & Attire: [Outfit and its state, concisely.]
->🍴(0-100%) | 😴(0-100%) | 🚿(0-100%) | 🚽(0-100%) | 💧(0-100%) | 🔥(0-200%) | 🧠(0-100%) // 🎯: [Active impulse.]
+  <div class="enaenn-location">📍 [Concise 1-sentence description of agents' spatial positions]</div>
 
-<details><summary>*🌍 OFF-SCREEN AGENTS* [ONLY agents who have a relationship with the user. Otherwise write: "No relevant off-screen agents".]</summary>
-<p>♂️/♀️ [Name] — 📍[Location] // [What they are doing right now.]</p>
-<p>🍴(hungry/fine/full) | 😴(exhausted/fine/rested) | 🚿(smelly/fine/fresh) | 🚽(fine/pressing/urgent) | 💧(fine/thirsty/dehydrated) | 🔥(none/simmering/high/sexual activity) | 🧠(calm/tense/stressed) // 🎯: [Active impulse.]</p>
-</details>
+  <div class="enaenn-agents">
+    [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).]
 
----
+    <div class="enaenn-agent-card">
+      <div class="enaenn-agent-name">[♀️ or ♂️] [Name] ❖ [Attire and its current state, concisely]</div>
+      <div class="enaenn-vitals">
+        [7 vital rows — see VITAL ROW FORMAT below]
+      </div>
+      [Only if an active condition exists (injury / illness / intoxication / pain / medication / temperature discomfort):
+      <div class="enaenn-condition">🩹 [Concise condition description and how it affects the agent]</div>]
+      <div class="enaenn-impulse">🎯 [The agent's most active current drive or urge]</div>
+    </div>
+  </div>
 
-### 💕 RELATIONSHIP MATRIX
-\`\`\`
-Name → Target:
-Main:
-[Emoji] [Feeling] (Value/1000)  (+/-N from [action])
-In The Moment:
-[Emoji] [TempFeeling1] (Value/100)  (+/-N from [action])
-[Emoji] [TempFeeling2] (Value/100)  (+/-N from [action])
-KNOW EACH OTHER FOR:
-[AgentName] ↔ [User]: [Time since first meeting]
-STAGE: [e.g. "Strangers", "Growing Friendship"]
-\`\`\`
+  <details class="enaenn-section">
+    <summary>🌍 Off-screen Agents</summary>
+    <div class="enaenn-section-body">
+      [One .enaenn-offscreen-row per agent who has a relationship with the user but is currently off-screen.
+       If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
+      <div class="enaenn-offscreen-row">
+        <div class="enaenn-offscreen-name">[♀️/♂️] [Name] — 📍[Location] // [What they are doing right now]</div>
+        <div class="enaenn-offscreen-vitals">🍴([hungry/fine/full]) | 😴([exhausted/fine/rested]) | 🚿([smelly/fine/fresh]) | 🚽([fine/pressing/urgent]) | 💧([fine/thirsty/dehydrated]) | 🔥([none/simmering/high/active]) | 🧠([calm/tense/stressed]) // 🎯 [Active impulse]</div>
+      </div>
+    </div>
+  </details>
 
----
+  <details class="enaenn-section">
+    <summary>💕 Relationship Matrix</summary>
+    <div class="enaenn-section-body">
+      [One .enaenn-rel-block per agent who has a relationship with the user. Between multiple agents, insert <div class="enaenn-rel-separator"></div>.]
+      <div class="enaenn-rel-block">
+        <div class="enaenn-rel-title">[AgentName] → [User]</div>
+        <div class="enaenn-rel-main">
+          <span>[Emoji] [Main feeling name as the AGENT would describe it]</span>
+          <div class="enaenn-rel-bar-wrap"><div class="enaenn-rel-fill" style="width:[value÷10]%"></div></div>
+          <span class="enaenn-rel-val">([value]/1000)</span>
+        </div>
+        <div class="enaenn-rel-moments">
+          [Up to 4 in-the-moment feeling rows:]
+          <div class="enaenn-rel-moment-row">
+            <span>[Emoji] [Feeling name]</span>
+            <div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:[value]%"></div></div>
+            <span class="enaenn-rel-moment-val">[value]</span>
+          </div>
+        </div>
+        <div class="enaenn-rel-stage">Known [duration] · [Relationship stage]</div>
+      </div>
+    </div>
+  </details>
 
-### 📅 FUTURE PLANS
+  [Only if there are upcoming plans:]
+  <details class="enaenn-section">
+    <summary>📅 Future Plans</summary>
+    <div class="enaenn-section-body">
+      [One row per plan, chronological:]
+      <div class="enaenn-plan-row">
+        <span class="enaenn-plan-date">[day, month]</span>
+        <span class="enaenn-plan-desc">[Concise description]</span>
+      </div>
+    </div>
+  </details>
 
-• **[day, month]** — [Concise note of upcoming agreed events, chronological.]
-</small></memo>
+</div>
 
-════════════════════════════════════════
+════════════════════════════════════
+VITAL ROW FORMAT (use for all 7 vitals)
+════════════════════════════════════
+
+<div class="enaenn-vital-row">
+  <span class="enaenn-vital-emoji">[EMOJI]</span>
+  <div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill [COLOR_CLASS]" style="width:[BAR_WIDTH]%"></div></div>
+  <span class="enaenn-vital-val">[VALUE]%</span>
+  <span class="enaenn-vital-delta">([DELTA]%)</span>
+</div>
+
+COLOR_CLASS rules — choose based on value AND polarity:
+
+LOW = critical vitals (🍴😴🚿) — low values are dangerous:
+  value ≥ 50% → enaenn-fill-ok
+  value 25–49% → enaenn-fill-warn
+  value < 25% → enaenn-fill-crit
+
+HIGH = critical vitals (💧🚽🧠) — high values are dangerous:
+  value ≤ 50% → enaenn-fill-ok
+  value 51–74% → enaenn-fill-warn
+  value ≥ 75% → enaenn-fill-crit
+
+🔥 Arousal (0–200%) — always: enaenn-fill-arousal
+  BAR_WIDTH = min(value, 100) — bar caps at 100% even when value exceeds it
+  Show actual value in .enaenn-vital-val (e.g. "142%")
+
+DELTA format: show change from previous snapshot, e.g. "(−2.4%)" or "(+15%)". Use "—" if this is the first snapshot.
+
+════════════════════════════════════
 VITAL TRACKING GUIDELINES
-════════════════════════════════════════
+════════════════════════════════════
 
-VITAL POLARITIES — do NOT confuse these:
-  LOW = critical: 🍴 food satiation | 😴 energy | 🚿 cleanliness
-  HIGH = critical: 💧 thirst | 🔥 arousal | 🚽 bladder | 🧠 stress
+Track all vitals separately for each on-screen agent. Never track the user.
+LOW = critical: 🍴 food satiation | 😴 energy | 🚿 cleanliness
+HIGH = critical: 💧 thirst | 🔥 arousal | 🚽 bladder | 🧠 stress
+Do NOT confuse these polarities.
+Calculate decay/rise based on elapsed in-scene time.
 
 VITAL RATES (per 5 min / per hour):
-  🍴  decay -0.2–0.4% / -2.4–4.8%.  Meal: +60–80%. Snack: +10–17%.
-  😴  decay -0.25–0.33% / -3–4% (normal); -0.4–0.6% / -5–7% (strenuous).
-      Sleep restores +10–15%/hr. At 100% → wake (unless <6 hr slept at night, then continue for circadian realism). Never use sleep as scene-closer.
-  🚿  decay -0.05–0.15% / -0.6–1.8% (×3–4 during exertion/heat/dirt).
-      Shower: +95–100%. Quick wash: +5–10%. Clean clothes: +3–5%.
-  💧/🚽 rise +0.3–0.7% / +4–8%. Glass of water: 💧 −45–55%, 🚽 +8–12%. Bottle: 💧 −100%, 🚽 +20–25%.
-  🧠  decay -0.3–0.5% / -3.6–6% during restful/positive/sleep. Rises from unmet needs, friction, danger. If 🧠 > 75% → agent seeks stress relief.
-  🔥  build +2–8%/5min. Decay (no stimulus) ~-0.5%/5min. Values >100% = sexual activity only. 200% = climax.
+🍴  decay −0.2–0.4% / −2.4–4.8%.  Meal: +60–80%. Snack: +10–17%.
+😴  decay −0.25–0.33% / −3–4% (normal); −0.4–0.6% / −5–7% (strenuous).
+    Sleep restores +10–15%/hr. At 100% → wake (unless <6 hr slept at night; then continue for circadian realism). Never use sleep as a scene-closer.
+🚿  decay −0.05–0.15% / −0.6–1.8% (×3–4 during exertion/heat/dirt).
+    Shower: +95–100%. Quick wash: +5–10%. Clean clothes: +3–5%.
+💧/🚽 rise +0.3–0.7% / +4–8%. Glass of water: 💧 −45–55%, 🚽 +8–12%. Bottle: 💧 −100%, 🚽 +20–25%.
+🧠  decay −0.3–0.5% / −3.6–6% during restful/positive/sleep. Rises from unmet needs, friction, danger. If 🧠 > 75% → agent seeks stress relief.
+🔥  build +2–8%/5min. Decay (no stimulus) ~−0.5%/5min. Values >100% = sexual activity only. 200% = climax.
 
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
-DISPLAY every change, e.g. "😴: 55.8% (−0.2%)" for every agent.
-🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Affects vitals and behavior.
+If any of 🍴, 😴, 🚿 drops below 25% or any of 💧, 🚽 rises above 75%, the agent must prioritize resolving that need above all non-life-threatening social interaction.
+Unmet needs affect behavior: low 😴 → irritability; high 🔥 → distraction; high 🧠 → stress-seeking behavior; etc.
+Multiple vitals can shift at once from one event (e.g. sex drops 🚿 and 🍴, drops 🔥, raises 🚽 and 💧).
 
-RELATIONSHIP MATRIX RULES:
-  Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless major event. Naturally evolves at 0 or 1000.
-  In The Moment (0–100, max 4 feelings): tied to current events.
-    At 100 or 0 → transform into natural successor/predecessor.
-    Negative transformation → deduct 1–20 from Main. Positive → add 1–5 to Main.
-  Off-screen agents: keep only Main feeling + status + 'known for'.
-  Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
-  Choose feeling words as the AGENT would define them.`;
+🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show in the condition tag only when active. Conditions must realistically affect vitals and behavior.
+
+════════════════════════════════════
+RELATIONSHIP MATRIX RULES
+════════════════════════════════════
+
+Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major event occurs. Naturally evolves at 0 or 1000 into its successor/predecessor. Large deductions are allowed during seriously negative events — amount depends on agent personality, relationship stage, and severity. Never rush development.
+
+In The Moment feelings (0–100, max 4): tied to current events.
+  At 100 or 0 → transform into natural successor/predecessor.
+  Negative transformation → deduct 1–20 from Main. Positive → add 1–5 to Main.
+  Dissipate feelings that no longer reflect current events.
+
+Relationship stage + "known for" duration: track separately for each agent.
+Off-screen agents: show only Main feeling, status, and known duration in the matrix.
+Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
+Choose ALL feeling names as the AGENT would personally describe them.`;
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
 
@@ -203,6 +278,7 @@ async function callTrackerAPI() {
         return null;
     }
 
+    // Roleplay messages only — tracker messages excluded so the API gets clean story context
     const recentRoleplay = chat
         .filter(m => !m.extra?.[TRACKER_FLAG])
         .slice(-(S().contextMessages));
@@ -212,13 +288,13 @@ async function callTrackerAPI() {
         .join('\n\n');
 
     const prevState = S().lastTracker
-        ? `PREVIOUS TRACKER STATE:\n${S().lastTracker}`
-        : 'No previous tracker state. Initialize a fresh one from the chat context.';
+        ? `PREVIOUS TRACKER STATE (HTML card):\n${S().lastTracker}`
+        : 'No previous tracker state. Initialize fresh from the chat context.';
 
     const userMessage =
         `${prevState}\n\n---\n\n` +
         `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
-        `Output the updated tracker wrapped in <div class="enaenn-tracker-block">...</div>. Nothing else.`;
+        `Output the updated tracker card. HTML only, nothing else.`;
 
     try {
         const base     = profile.endpoint.replace(/\/+$/, '');
@@ -234,7 +310,7 @@ async function callTrackerAPI() {
                     { role: 'system', content: TRACKER_SYSTEM_PROMPT },
                     { role: 'user',   content: userMessage },
                 ],
-                max_tokens:  1500,
+                max_tokens:  2000,
                 temperature: 0.2,
                 stream:      false,
             }),
@@ -258,6 +334,7 @@ async function callTrackerAPI() {
 // ─── INSERT TRACKER MESSAGE ───────────────────────────────────────────────────
 
 async function insertTrackerMessage(content) {
+    // Ensure our wrapper div is present (the API might occasionally omit it)
     const wrapped = content.includes('enaenn-tracker-block')
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
@@ -279,7 +356,7 @@ async function insertTrackerMessage(content) {
     chat.push(mesObj);
     const mesId = chat.length - 1;
 
-    // Try ST's addOneMessage first (loaded dynamically — null if unavailable)
+    // Try ST's addOneMessage first; fall back to manual DOM injection
     if (_addOneMessage) {
         try {
             await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
@@ -293,9 +370,7 @@ async function insertTrackerMessage(content) {
     $('#chat').append(`
         <div class="mes" mesid="${mesId}" is_system="false">
             <div class="mes_block">
-                <div class="ch_name">
-                    <span class="name_text">Tracker</span>
-                </div>
+                <div class="ch_name"><span class="name_text">Tracker</span></div>
                 <div class="mes_text">${wrapped}</div>
             </div>
         </div>
@@ -326,7 +401,9 @@ async function updateTracker() {
         ? result
         : `<div class="enaenn-tracker-block">${result}</div>`;
 
+    // Save as "previous state" for the next API call
     save({ lastTracker: wrapped });
+
     await insertTrackerMessage(wrapped);
     await enforceWindow();
 
@@ -497,7 +574,7 @@ function addToolbarButton() {
 jQuery(async () => {
     initSettings();
 
-    // Try to load addOneMessage dynamically — safe, won't crash if missing
+    // Try to load addOneMessage dynamically — won't crash if missing
     try {
         const mod = await import('../../../../script.js');
         _addOneMessage = mod.addOneMessage ?? null;
@@ -520,6 +597,7 @@ jQuery(async () => {
     bindUI();
     addToolbarButton();
 
+    // Auto-update after each AI reply
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (S().enabled && S().autoUpdate) {
             await new Promise(r => setTimeout(r, 700));
@@ -527,6 +605,7 @@ jQuery(async () => {
         }
     });
 
+    // On chat change: clear saved state so the new chat starts fresh
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         save({ lastTracker: '' });
         await enforceWindow();

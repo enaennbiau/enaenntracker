@@ -1,8 +1,8 @@
-/* ═══════════════════════════════════════
-   enaennTracker — stylesheet
-   ═══════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   enaennTracker — card stylesheet
+   ═══════════════════════════════════════════════════ */
 
-/* Label styling inside settings panel */
+/* ── Settings panel ──────────────────────────────── */
 #enaennTracker_root label {
     display: block;
     font-size: 0.82em;
@@ -10,29 +10,22 @@
     margin-top: 8px;
     margin-bottom: 3px;
 }
-
-/* Profile editor box */
 #enaennTracker_profileEditor {
     border: 1px solid #555;
     border-radius: 6px;
     padding: 10px;
     margin-bottom: 8px;
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(255,255,255,0.03);
 }
-
 #enaennTracker_profileEditor .editor-title {
     font-weight: bold;
     font-size: 0.9em;
     margin-bottom: 6px;
     color: #ccc;
 }
+.enaenn-gap { margin-bottom: 8px; }
 
-/* Gap helper */
-.enaenn-gap {
-    margin-bottom: 8px;
-}
-
-/* Toolbar refresh button */
+/* ── Toolbar button ──────────────────────────────── */
 #enaennTracker_toolbarBtn {
     cursor: pointer;
     padding: 4px 9px;
@@ -41,22 +34,355 @@
     user-select: none;
     transition: opacity 0.15s;
 }
-
-#enaennTracker_toolbarBtn:hover  { opacity: 1;   }
+#enaennTracker_toolbarBtn:hover  { opacity: 1; }
 #enaennTracker_toolbarBtn:active { opacity: 0.4; }
 
-/* ── Tracker messages inside the chat ────────────────────────────────────── */
+/* ══════════════════════════════════════════════════
+   TRACKER CARD — lives inside .enaenn-tracker-block
+   ══════════════════════════════════════════════════ */
 
-/* Active tracker block — rendered in the chat bubble */
 .enaenn-tracker-block {
-    font-size: 0.85em;
-    line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 12px;
+    color: var(--SmartThemeBodyColor);
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 4px 0;
 }
 
-/* Archived tracker placeholder */
+/* ── Location header ─────────────────────────────── */
+.enaenn-location {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.9em;
+    opacity: 0.85;
+    position: relative;
+    overflow: hidden;
+}
+.enaenn-location::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent,
+        color-mix(in srgb, var(--SmartThemeBodyColor) 35%, transparent), transparent);
+    pointer-events: none;
+}
+
+/* ── Agent cards row ─────────────────────────────── */
+.enaenn-agents {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.enaenn-agent-card {
+    flex: 1;
+    min-width: 190px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 3%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+    border-radius: 14px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}
+.enaenn-agent-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent,
+        color-mix(in srgb, var(--SmartThemeBodyColor) 30%, transparent), transparent);
+    pointer-events: none;
+}
+
+.enaenn-agent-name {
+    font-size: 1.25em;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    margin-bottom: 1px;
+}
+
+.enaenn-agent-attire {
+    font-size: 0.82em;
+    opacity: 0.6;
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    padding-bottom: 7px;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+    line-height: 1.3;
+}
+
+/* ── Vitals ──────────────────────────────────────── */
+.enaenn-vitals {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.enaenn-vital-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.83em;
+}
+
+.enaenn-vital-emoji {
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 1em;
+}
+
+.enaenn-vital-bar-wrap {
+    flex: 1;
+    height: 4px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.enaenn-vital-fill {
+    height: 100%;
+    border-radius: 3px;
+}
+
+/* Color classes — pick based on value + polarity */
+.enaenn-fill-ok   { background: linear-gradient(90deg, #3d8b5c, #5cb07a); }
+.enaenn-fill-warn { background: linear-gradient(90deg, #b07d28, #d9a040); }
+.enaenn-fill-crit { background: linear-gradient(90deg, #8b3030, #b04848); }
+.enaenn-fill-arousal { background: linear-gradient(90deg, #7D2A40, #A94064); }
+
+.enaenn-vital-val {
+    font-size: 0.8em;
+    font-weight: 700;
+    min-width: 38px;
+    text-align: right;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.enaenn-vital-delta {
+    font-size: 0.75em;
+    opacity: 0.5;
+    min-width: 42px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* ── Condition tag ───────────────────────────────── */
+.enaenn-condition {
+    font-size: 0.8em;
+    padding: 3px 8px;
+    background: color-mix(in srgb, #b04848 18%, transparent);
+    border: 1px solid color-mix(in srgb, #b04848 28%, transparent);
+    border-radius: 8px;
+    line-height: 1.3;
+}
+
+/* ── Active impulse ──────────────────────────────── */
+.enaenn-impulse {
+    font-size: 0.82em;
+    opacity: 0.7;
+    padding-top: 5px;
+    border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+    display: flex;
+    gap: 5px;
+    align-items: flex-start;
+    line-height: 1.3;
+}
+
+/* ── Collapsible sections ────────────────────────── */
+.enaenn-section {
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.enaenn-section > summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.87em;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    opacity: 0.78;
+    user-select: none;
+    transition: opacity 0.15s;
+}
+.enaenn-section > summary:hover { opacity: 1; }
+.enaenn-section > summary::-webkit-details-marker { display: none; }
+.enaenn-section > summary::after {
+    content: '\f078';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    margin-left: auto;
+    font-size: 0.72em;
+    opacity: 0.55;
+    transition: transform 0.2s;
+}
+.enaenn-section[open] > summary::after { transform: rotate(180deg); }
+.enaenn-section[open] > summary {
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+}
+
+.enaenn-section-body {
+    padding: 8px 12px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+/* ── Off-screen agent rows ───────────────────────── */
+.enaenn-offscreen-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.84em;
+    padding: 5px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+}
+.enaenn-offscreen-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+.enaenn-offscreen-name  { font-weight: 700; }
+.enaenn-offscreen-vitals { opacity: 0.65; font-size: 0.92em; margin-top: 1px; }
+
+/* ── Relationship matrix ─────────────────────────── */
+.enaenn-rel-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 3px 0;
+}
+
+.enaenn-rel-separator {
+    height: 1px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+    margin: 4px 0;
+}
+
+.enaenn-rel-title {
+    font-weight: 800;
+    font-size: 0.85em;
+    opacity: 0.65;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.enaenn-rel-main {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9em;
+    font-weight: 600;
+}
+
+.enaenn-rel-bar-wrap {
+    flex: 1;
+    height: 4px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.enaenn-rel-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #8C7A9E, #B6A6CA);
+}
+
+.enaenn-rel-val {
+    font-size: 0.8em;
+    font-weight: 700;
+    opacity: 0.75;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.enaenn-rel-moments {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding-left: 2px;
+}
+
+.enaenn-rel-moment-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 0.83em;
+    opacity: 0.85;
+}
+.enaenn-rel-moment-bar-wrap {
+    flex: 1;
+    height: 3px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.enaenn-rel-moment-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 38%, transparent);
+}
+.enaenn-rel-moment-val {
+    font-size: 0.85em;
+    font-weight: 700;
+    opacity: 0.7;
+    min-width: 22px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.enaenn-rel-stage {
+    font-size: 0.8em;
+    opacity: 0.55;
+    font-style: italic;
+    margin-top: 1px;
+}
+
+/* ── Future plans ────────────────────────────────── */
+.enaenn-plan-row {
+    display: flex;
+    gap: 9px;
+    font-size: 0.85em;
+    align-items: flex-start;
+    padding: 3px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+}
+.enaenn-plan-row:last-child { border-bottom: none; }
+.enaenn-plan-date {
+    font-weight: 700;
+    white-space: nowrap;
+    opacity: 0.85;
+    flex-shrink: 0;
+}
+.enaenn-plan-desc { opacity: 0.75; line-height: 1.3; }
+
+/* ── Archived tracker placeholder ────────────────── */
 .enaenn-tracker-archived {
     font-size: 0.78em;
-    opacity: 0.45;
+    opacity: 0.4;
     padding: 2px 0;
     font-style: italic;
 }
