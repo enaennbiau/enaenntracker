@@ -45,13 +45,24 @@ STRICT OUTPUT RULES
 - If no previous tracker state exists OR it is outdated, initialize all values fresh from chat context.
 
 ════════════════════════════════════
-AGENT PRESENCE RULES (read carefully)
+TAB RULES — READ CAREFULLY
 ════════════════════════════════════
-TAB 1 (Agents Present) and TAB 2 (Relationship Matrix) use a 4-slot grid.
-- SLOTS ARE FILLED only for agents who are PHYSICALLY IN THE CURRENT SCENE alongside the user.
-- If the user is alone right now, all 4 slots are empty. This is correct — do not force agents into slots if they are not in the scene.
-- Agents who are somewhere else belong in TAB 3 (Off-screen), NOT in Tabs 1 or 2.
-- TAB 2 mirrors TAB 1 exactly: Slot N in Tab 2 = same agent as Slot N in Tab 1 (or both empty).
+
+TAB 1 — Agents Present (3-slot grid):
+- Only agents PHYSICALLY IN THE CURRENT SCENE go here (never the user).
+- Output EXACTLY 3 .enaenn-agent-slot children. Fill left-to-right; pad unused slots with the empty-slot div.
+- If the user is alone (no agents in scene): output ONE card spanning the full row with class "enaenn-agent-slot enaenn-alone" containing only: <div class="enaenn-agent-name">No agents present.</div> — then TWO empty slots.
+
+TAB 2 — Relationship Matrix (always populated):
+- ALWAYS shows ALL tracked agents with a relationship to the user — both on-screen AND off-screen.
+- This tab is NEVER empty. Even when the user is alone, all relationships are still shown here.
+- Use a flat list of .enaenn-rel-block divs separated by .enaenn-rel-separator divs. Do NOT use the grid layout.
+
+TAB 3 — Off-screen Agents (text list):
+- One .enaenn-offscreen-row per agent NOT in the current scene who has a relationship with the user.
+- Vitals MUST be written as SHORT TEXT LABELS ONLY — no percentages, no calculations, no bar values.
+  Use exactly these label words: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm
+- Format: 🍴(label) | 😴(label) | 🚿(label) | 🚽(label) | 💧(label) | 🔥(label) | 🧠(label) // 🎯 [impulse]
 
 ════════════════════════════════════
 FULL HTML STRUCTURE
@@ -77,22 +88,24 @@ FULL HTML STRUCTURE
       <div class="enaenn-tp1">
         <div class="enaenn-agents-grid">
 
-          [Output EXACTLY 4 .enaenn-agent-slot children. Fill left-to-right for each agent physically present in the scene (never the user). Pad remaining slots with: <div class="enaenn-agent-slot enaenn-slot-empty"></div>]
-
-          <!-- EXAMPLE filled slot — replace placeholder text with real values: -->
+          [EXACTLY 3 children. Example when 1 agent present:]
           <div class="enaenn-agent-slot">
-            <div class="enaenn-agent-name">[♀️ or ♂️] [Name]</div>
-            <div class="enaenn-agent-attire">👗 [Attire and current state, concise]</div>
-            <div class="enaenn-vitals">
-              [7 vital rows — see VITAL ROW FORMAT below]
-            </div>
-            [Only if an active condition (injury/illness/intoxication/pain/medication/temperature discomfort):
-            <div class="enaenn-condition">🩹 [Condition and how it affects the agent]</div>]
-            <div class="enaenn-impulse">🎯 [Agent's most active current drive or urge]</div>
+            <div class="enaenn-agent-name">[♀️/♂️] [Name]</div>
+            <div class="enaenn-agent-attire">👗 [Attire + state, concise]</div>
+            <details class="enaenn-vitals-fold" open>
+              <summary>Vitals</summary>
+              <div class="enaenn-vitals">
+                [7 vital rows — see VITAL ROW FORMAT below]
+              </div>
+            </details>
+            [Only if active condition: <div class="enaenn-condition">🩹 [condition]</div>]
+            <div class="enaenn-impulse">🎯 [current drive]</div>
           </div>
-
-          <!-- EXAMPLE empty slot: -->
           <div class="enaenn-agent-slot enaenn-slot-empty"></div>
+          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
+
+          [Example when user is alone:]
+          <div class="enaenn-agent-slot enaenn-alone"><div class="enaenn-agent-name">No agents present.</div></div>
           <div class="enaenn-agent-slot enaenn-slot-empty"></div>
           <div class="enaenn-agent-slot enaenn-slot-empty"></div>
 
@@ -100,12 +113,11 @@ FULL HTML STRUCTURE
       </div>
 
       <div class="enaenn-tp2">
-        <div class="enaenn-agents-grid">
+        <div class="enaenn-rel-list">
 
-          [Output EXACTLY 4 .enaenn-agent-slot children in THE SAME ORDER as Tab 1. Slot N here = same agent as Slot N in Tab 1, or both empty. Fill only slots that have a corresponding present agent in Tab 1.]
+          [One .enaenn-rel-block per ALL tracked agents — on-screen and off-screen. Separate blocks with .enaenn-rel-separator. This section is NEVER empty.]
 
-          <!-- EXAMPLE filled slot — replace placeholder text with real values: -->
-          <div class="enaenn-agent-slot">
+          <div class="enaenn-rel-block">
             <div class="enaenn-rel-title">[Name] → [User]</div>
             <div class="enaenn-rel-main">
               <span>[Emoji] [Main feeling name as the AGENT would describe it]</span>
@@ -122,22 +134,19 @@ FULL HTML STRUCTURE
             </div>
             <div class="enaenn-rel-stage">Known [duration] · [Relationship stage]</div>
           </div>
-
-          <!-- EXAMPLE empty slot: -->
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
+          <div class="enaenn-rel-separator"></div>
+          [repeat for each tracked agent]
 
         </div>
       </div>
 
       <div class="enaenn-tp3">
 
-        [One .enaenn-offscreen-row per agent who has a relationship with the user but is NOT in the current scene. Stop tracking agents who haven't interacted with the user for a week+ of in-game time ({{char}} is always tracked). If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
+        [One .enaenn-offscreen-row per off-screen agent with a relationship to the user. Vitals in SHORT TEXT LABELS only — no numbers. If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
 
         <div class="enaenn-offscreen-row">
-          <div class="enaenn-offscreen-name">[♀️/♂️] [Name] — 📍[Location] // [What they are doing right now]</div>
-          <div class="enaenn-offscreen-vitals">🍴([hungry/fine/full]) | 😴([exhausted/fine/rested]) | 🚿([smelly/fine/fresh]) | 🚽([fine/pressing/urgent]) | 💧([fine/thirsty/dehydrated]) | 🔥([none/simmering/high/active]) | 🧠([calm/tense/stressed]) // 🎯 [Active impulse]</div>
+          <div class="enaenn-offscreen-name">[♀️/♂️] [Name] — 📍[Location] // [What they are doing]</div>
+          <div class="enaenn-offscreen-vitals">🍴(fine) | 😴(rested) | 🚿(fresh) | 🚽(fine) | 💧(fine) | 🔥(none) | 🧠(calm) // 🎯 [impulse]</div>
         </div>
 
       </div>
