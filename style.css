@@ -150,7 +150,7 @@
 
 .enaenn-agents-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 6px;
     width: 100%;
     box-sizing: border-box;
@@ -180,7 +180,56 @@
     pointer-events: none;
 }
 
-/* ── Empty slot ──────────────────────────────────── */
+/* ── "No agents present" card ────────────────────── */
+.enaenn-agent-slot.enaenn-alone {
+    grid-column: 1 / -1;
+    justify-content: center;
+    align-items: center;
+    min-height: 48px;
+    opacity: 0.45;
+    font-style: italic;
+    border-style: dashed;
+}
+.enaenn-agent-slot.enaenn-alone::before { display: none; }
+
+/* ── Foldable vitals inside agent card ───────────── */
+.enaenn-vitals-fold {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+.enaenn-vitals-fold > summary {
+    list-style: none;
+    cursor: pointer;
+    font-size: 0.7em;
+    opacity: 0.45;
+    user-select: none;
+    padding: 2px 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+    margin-bottom: 3px;
+    transition: opacity 0.15s;
+}
+.enaenn-vitals-fold > summary:hover { opacity: 0.8; }
+.enaenn-vitals-fold > summary::-webkit-details-marker { display: none; }
+.enaenn-vitals-fold > summary::before {
+    content: '▸';
+    font-size: 0.85em;
+    transition: transform 0.15s;
+}
+.enaenn-vitals-fold[open] > summary::before { transform: rotate(90deg); }
+
+/* ── Relationship list (Tab 2 flat layout) ───────── */
+.enaenn-rel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 4px 0;
+}
 .enaenn-slot-empty {
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 1%, transparent);
     border: 1px dashed color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
