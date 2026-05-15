@@ -69,8 +69,8 @@ Use EXACTLY this structure (fill values, keep all class names):
   <details class="enaenn-section">
     <summary>💖 AGENTS PRESENT</summary>
     <div class="enaenn-agents">
-     [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).
-      If user is alone: <div class="enaenn-agent-card"><div class="enaenn-agent-name">No agents present.</div></div>]
+     [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. USER IS NOT AN AGENT! Don’t include them here. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).
+      If user is alone in the current scene: <div class="enaenn-agent-card"><div class="enaenn-agent-name">No agents present.</div></div>]
      <div class="enaenn-agent-card">
        <div class="enaenn-agent-name">[♀️ or ♂️] [Name] ❖ [Attire and its current state, concisely]</div>
        <div class="enaenn-vitals">
