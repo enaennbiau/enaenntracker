@@ -19,14 +19,12 @@ import {
     event_types,
     saveSettingsDebounced,
     chat,
+    addOneMessage,
 } from '../../../../script.js';
 
 import {
     extension_settings,
 } from '../../../extensions.js';
-
-// Loaded dynamically in init — safe if not exported by this ST version
-let _addOneMessage = null;
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
@@ -244,7 +242,11 @@ function archiveTrackerAt(idx) {
     if (!m.extra.fullContent) m.extra.fullContent = m.mes;
     m.extra.archived = true;
     m.mes = '<div class="enaenn-tracker-archived">📋 <em>[archived tracker]</em></div>';
-    $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
+    // Use last-resort DOM query — mesid may not always match index exactly
+    const $el = $(`#chat .mes[mesid="${idx}"]`);
+    if ($el.length) {
+        $el.find('.mes_text').html(m.mes);
+    }
 }
 
 function restoreTrackerAt(idx) {
@@ -252,11 +254,14 @@ function restoreTrackerAt(idx) {
     if (!m || !m.extra?.archived) return;
     m.mes = m.extra.fullContent || m.mes;
     m.extra.archived = false;
-    $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
+    const $el = $(`#chat .mes[mesid="${idx}"]`);
+    if ($el.length) {
+        $el.find('.mes_text').html(m.mes);
+    }
 }
 
 async function enforceWindow() {
-    const indices   = getTrackerIndices();
+    const indices = getTrackerIndices();
     if (indices.length === 0) return;
     const cutoff    = Math.max(0, indices.length - S().windowSize);
     const toArchive = indices.slice(0, cutoff);
@@ -339,15 +344,18 @@ async function insertTrackerMessage(content) {
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
 
+    // FIX #1: Store a plain placeholder in `mes` so ST's messageFormatting()
+    // never sees or escapes the real HTML. We inject the real HTML into the
+    // DOM ourselves after addOneMessage has finished rendering.
     const mesObj = {
         name:      'Tracker',
         is_user:   false,
-        is_system: false,
-        mes:       wrapped,
+        is_system: true,
+        mes:       ' ',          // plain whitespace placeholder — never shown
         send_date: new Date().toLocaleString(),
         extra: {
             [TRACKER_FLAG]: true,
-            fullContent:    wrapped,
+            fullContent:    wrapped,  // real HTML kept here
             archived:       false,
             token_count:    0,
         },
@@ -356,25 +364,38 @@ async function insertTrackerMessage(content) {
     chat.push(mesObj);
     const mesId = chat.length - 1;
 
-    // Try ST's addOneMessage first; fall back to manual DOM injection
-    if (_addOneMessage) {
-        try {
-            await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
-            return;
-        } catch (e) {
-            console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
-        }
+    try {
+        // FIX #2: Use statically-imported addOneMessage (no dynamic re-import needed)
+        await addOneMessage(mesObj, { scroll: true, type: 'narrator' });
+
+        // FIX #3: After ST renders the placeholder, replace .mes_text with real HTML.
+        // Use .last() as a reliable fallback in case mesid attribute lags behind.
+        const $byId   = $(`#chat .mes[mesid="${mesId}"]`);
+        const $target = $byId.length ? $byId : $('#chat .mes').last();
+        $target.find('.mes_text').html(wrapped);
+
+        // Scroll to bottom after HTML injection
+        const $chat = $('#chat');
+        $chat.scrollTop($chat[0].scrollHeight);
+        return;
+
+    } catch (e) {
+        console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
     }
 
-    // DOM fallback
+    // ── DOM fallback (if addOneMessage is unavailable or throws) ──────────────
     $('#chat').append(`
-        <div class="mes" mesid="${mesId}" is_system="false">
+        <div class="mes" mesid="${mesId}" is_system="true">
             <div class="mes_block">
                 <div class="ch_name"><span class="name_text">Tracker</span></div>
-                <div class="mes_text">${wrapped}</div>
+                <div class="mes_text"></div>
             </div>
         </div>
     `);
+    // FIX #1 (fallback): inject HTML via .html(), never via template literal
+    // so it is parsed as DOM nodes, not escaped text.
+    $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(wrapped);
+
     const $chat = $('#chat');
     $chat.scrollTop($chat[0].scrollHeight);
 }
@@ -574,16 +595,11 @@ function addToolbarButton() {
 jQuery(async () => {
     initSettings();
 
-    // Try to load addOneMessage dynamically — won't crash if missing
-    try {
-        const mod = await import('../../../../script.js');
-        _addOneMessage = mod.addOneMessage ?? null;
-        console.log(_addOneMessage
-            ? '[enaennTracker] addOneMessage loaded.'
-            : '[enaennTracker] addOneMessage not found, using DOM fallback.');
-    } catch (e) {
-        console.warn('[enaennTracker] Dynamic import failed:', e);
-    }
+    // FIX #4: addOneMessage is now statically imported — no dynamic re-import needed.
+    // Just log whether it was successfully resolved.
+    console.log(typeof addOneMessage === 'function'
+        ? '[enaennTracker] addOneMessage loaded via static import.'
+        : '[enaennTracker] WARNING: addOneMessage is not a function — DOM fallback will be used.');
 
     $('#extensions_settings2').append(SETTINGS_HTML);
 
