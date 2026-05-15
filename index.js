@@ -43,8 +43,6 @@ const DEFAULT_SETTINGS = {
 };
 
 // ─── TRACKER SYSTEM PROMPT ────────────────────────────────────────────────────
-// This is sent ONLY to your tracker API. The main model never sees it.
-// It instructs the tracker API to output a styled HTML card.
 
 const TRACKER_SYSTEM_PROMPT = `You are a silent background tracker for a collaborative roleplay. Your only job: read the previous tracker state and recent chat, then output one updated HTML tracker card. Output ONLY the HTML block — no preamble, no explanation, nothing else.
 
@@ -289,26 +287,22 @@ function buildUserMessage() {
     );
 }
 
-// ─── TRACKER API CALL — VIA ST BACKEND PROXY (mobile-safe) ──────────────────
+// ─── TRACKER API CALL — VIA ST BACKEND PROXY ─────────────────────────────────
 //
-// Instead of fetching the external API directly from the browser (which causes
-// CORS / mixed-content failures on iOS Safari and other strict mobile browsers),
-// we POST to ST's own backend endpoint:
+// ST's /api/backends/chat-completions/generate endpoint routes based on
+// `chat_completion_source`. For the CUSTOM source, it reads the URL from
+// `custom_url` (NOT `reverse_proxy`) and the API key from ST's saved secrets
+// store (SECRET_KEYS.CUSTOM) — there is no way to pass the key dynamically
+// via the request body for the CUSTOM source.
 //
-//   POST /api/backends/chat-completions/generate
+// SOLUTION: Use `chat_completion_source: 'openai'` instead. For the OpenAI
+// source, ST explicitly supports overriding both the endpoint AND the key via
+// the request body:
+//   reverse_proxy  → overrides the base URL  (apiUrl = reverse_proxy || API_OPENAI)
+//   proxy_password → used as the Bearer key  (apiKey = proxy_password || saved key)
 //
-// ST's Node server then makes the outbound call to your chosen API, so the
-// browser only ever talks to the ST origin it's already connected to.
-// We use getRequestHeaders() — imported from script.js — which attaches the
-// required CSRF token so ST's middleware accepts the request.
-//
-// The body mirrors what ST's own OpenAI-compatible "Custom" source sends:
-//   chat_completion_source = 'custom'
-//   reverse_proxy          = your endpoint base URL
-//   proxy_password         = your API key
-//   model                  = your model name
-//
-// This is exactly the mechanism Meddler uses for its "Quick API" feature.
+// This is the correct, officially supported way to call an arbitrary
+// OpenAI-compatible endpoint through ST's backend proxy.
 
 async function callViaSTBackend(userMessage) {
     const profile = getActiveProfile();
@@ -316,7 +310,12 @@ async function callViaSTBackend(userMessage) {
         toastr.warning('enaennTracker: No API profile selected. Open Extensions → enaennTracker.');
         return null;
     }
-    if (!profile.endpoint || !profile.model) {
+
+    const endpoint = (profile.endpoint || '').trim().replace(/\/+$/, '');
+    const model    = (profile.model    || '').trim();
+    const apiKey   = (profile.apiKey   || '').trim();
+
+    if (!endpoint || !model) {
         toastr.warning('enaennTracker: Active profile is missing Endpoint URL or Model name.');
         return null;
     }
@@ -324,15 +323,23 @@ async function callViaSTBackend(userMessage) {
     try {
         const response = await fetch('/api/backends/chat-completions/generate', {
             method:  'POST',
-            headers: getRequestHeaders(),   // ← attaches Content-Type + CSRF token
+            headers: getRequestHeaders(),   // attaches Content-Type + CSRF token
             body: JSON.stringify({
-                // Tell ST to use the generic OpenAI-compatible path
-                chat_completion_source: 'custom',
-                // ST forwards these to the external endpoint server-side
-                reverse_proxy:   profile.endpoint.replace(/\/+$/, ''),
-                proxy_password:  profile.apiKey || '',
-                model:           profile.model,
-                // The actual messages payload
+                // ── KEY FIX ──────────────────────────────────────────────────
+                // Use 'openai' source so ST honours reverse_proxy + proxy_password
+                // from the request body (CUSTOM source ignores both fields and
+                // reads from its own saved secrets store instead).
+                chat_completion_source: 'openai',
+
+                // For the 'openai' source ST uses:
+                //   apiUrl = request.body.reverse_proxy || API_OPENAI
+                //   apiKey = request.body.reverse_proxy
+                //              ? request.body.proxy_password
+                //              : readSecret(..., SECRET_KEYS.OPENAI)
+                reverse_proxy:  endpoint,
+                proxy_password: apiKey,
+
+                model:       model,
                 messages: [
                     { role: 'system', content: TRACKER_SYSTEM_PROMPT },
                     { role: 'user',   content: userMessage },
@@ -340,8 +347,6 @@ async function callViaSTBackend(userMessage) {
                 max_tokens:        1500,
                 temperature:       0.2,
                 stream:            false,
-                // These are required by ST's schema but we don't need them;
-                // passing safe defaults keeps the backend happy
                 top_p:             1,
                 presence_penalty:  0,
                 frequency_penalty: 0,
@@ -350,12 +355,10 @@ async function callViaSTBackend(userMessage) {
 
         if (!response.ok) {
             const errText = await response.text();
-            throw new Error(`ST backend returned HTTP ${response.status}: ${errText.slice(0, 300)}`);
+            throw new Error(`ST backend returned HTTP ${response.status}: ${errText.slice(0, 400)}`);
         }
 
         const data = await response.json();
-
-        // ST's /generate endpoint returns the same shape as OpenAI
         return data.choices?.[0]?.message?.content?.trim() ?? null;
 
     } catch (err) {
@@ -366,8 +369,6 @@ async function callViaSTBackend(userMessage) {
 }
 
 // ─── UNIFIED TRACKER API CALL ─────────────────────────────────────────────────
-//
-// Routes through ST's own backend endpoint — mobile-safe on all browsers.
 
 async function callTrackerAPI() {
     return callViaSTBackend(buildUserMessage());
@@ -540,7 +541,7 @@ const SETTINGS_HTML = `
         <div class="editor-title">Edit Profile</div>
         <label>Name</label>
         <input type="text"     id="enaennTracker_pName"     class="text_pole" placeholder="e.g. Longcat" />
-        <label>Endpoint URL</label>
+        <label>Endpoint URL <small>(include /v1, e.g. https://api.openai.com/v1)</small></label>
         <input type="text"     id="enaennTracker_pEndpoint" class="text_pole" placeholder="https://api.openai.com/v1" />
         <label>API Key <small>(leave blank if not needed)</small></label>
         <input type="password" id="enaennTracker_pKey"      class="text_pole" placeholder="sk-..." />
@@ -667,3 +668,4 @@ jQuery(async () => {
 
     console.log('[enaennTracker] Loaded successfully.');
 });
+
