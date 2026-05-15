@@ -334,6 +334,10 @@ async function callTrackerAPI() {
 
 // ─── INSERT TRACKER MESSAGE ───────────────────────────────────────────────────
 
+// Declared at module scope so it is always defined before use.
+// Assigned during init once we confirm the import succeeded.
+let _addOneMessage = null;
+
 async function insertTrackerMessage(content) {
     const wrapped = content.includes('enaenn-tracker-block')
         ? content
@@ -356,17 +360,15 @@ async function insertTrackerMessage(content) {
     chat.push(mesObj);
     const mesId = chat.length - 1;
 
-    // Try ST's addOneMessage first (loaded dynamically — null if unavailable)
+    // Use ST's addOneMessage if it was successfully loaded during init
     if (_addOneMessage) {
         try {
             await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
-            const $target = $byId.length ? $byId : $('#chat .mes').last();
-            $target.find('.mes_text').html(wrapped);
-            // Scroll to bottom after HTML injection
+            // Overwrite the rendered text with our raw HTML so styles apply
+            $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(wrapped);
             const $chat = $('#chat');
             $chat.scrollTop($chat[0].scrollHeight);
             return;
-            
         } catch (e) {
             console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
         }
@@ -384,7 +386,7 @@ async function insertTrackerMessage(content) {
         </div>
     `);
     $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(wrapped);
-    
+
     const $chat = $('#chat');
     $chat.scrollTop($chat[0].scrollHeight);
 }
@@ -582,15 +584,22 @@ function addToolbarButton() {
 jQuery(async () => {
     initSettings();
 
-    // Try to load addOneMessage dynamically — safe, won't crash if missing
-    try {
-        const mod = await import('../../../../script.js');
-        _addOneMessage = mod.addOneMessage ?? null;
-        console.log(_addOneMessage
-            ? '[enaennTracker] addOneMessage loaded.'
-            : '[enaennTracker] addOneMessage not found, using DOM fallback.');
-    } catch (e) {
-        console.warn('[enaennTracker] Dynamic import failed:', e);
+    // Try to assign addOneMessage from the static import; fall back to dynamic
+    // import if the static binding came in as undefined (can happen depending
+    // on ST version / bundling order).
+    if (typeof addOneMessage === 'function') {
+        _addOneMessage = addOneMessage;
+        console.log('[enaennTracker] addOneMessage loaded via static import.');
+    } else {
+        try {
+            const mod = await import('../../../../script.js');
+            _addOneMessage = (typeof mod.addOneMessage === 'function') ? mod.addOneMessage : null;
+            console.log(_addOneMessage
+                ? '[enaennTracker] addOneMessage loaded via dynamic import.'
+                : '[enaennTracker] addOneMessage not found in module, using DOM fallback.');
+        } catch (e) {
+            console.warn('[enaennTracker] Dynamic import failed, using DOM fallback:', e);
+        }
     }
 
     $('#extensions_settings2').append(SETTINGS_HTML);
