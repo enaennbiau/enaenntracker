@@ -255,6 +255,25 @@ function restoreTrackerAt(idx) {
     $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
 }
 
+/**
+ * Re-applies raw HTML content to all tracker messages in the DOM.
+ * Called after page load / chat switch, because ST's own render pipeline
+ * processes the stored `mes` string as markdown and escapes the HTML tags,
+ * leaving raw tag text visible instead of rendered cards.
+ */
+function reRenderTrackerMessages() {
+    const indices = getTrackerIndices();
+    for (const idx of indices) {
+        const m = chat[idx];
+        if (!m) continue;
+        const content = m.extra?.archived
+            ? '<div class="enaenn-tracker-archived">📋 <em>[archived tracker]</em></div>'
+            : (m.extra?.fullContent || m.mes);
+        const $el = $(`#chat .mes[mesid="${idx}"]`).find('.mes_text');
+        if ($el.length) $el.html(content);
+    }
+}
+
 async function enforceWindow() {
     const indices   = getTrackerIndices();
     if (indices.length === 0) return;
@@ -664,8 +683,11 @@ jQuery(async () => {
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         save({ lastTracker: '' });
         await enforceWindow();
+        // ST repaints all messages from stored `mes` strings on chat load,
+        // which escapes the raw HTML in tracker messages. Re-inject after
+        // ST finishes rendering the DOM.
+        setTimeout(reRenderTrackerMessages, 600);
     });
 
     console.log('[enaennTracker] Loaded successfully.');
 });
-
