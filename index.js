@@ -301,25 +301,57 @@ async function callTrackerAPI() {
         `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
         `Output the updated tracker card. HTML only, nothing else.`;
 
+    // Route the request through SillyTavern's backend proxy instead of calling
+    // the external API directly from the browser. This fixes Safari on iOS
+    // blocking direct fetch() calls to local/Tailscale HTTP addresses
+    // ("Load failed") due to its strict mixed-content / local network policy.
+    // ST's /api/proxy endpoint forwards the request server-side, which has
+    // no such restriction.
     try {
-        const base     = profile.endpoint.replace(/\/+$/, '');
-        const response = await fetch(`${base}/chat/completions`, {
+        const base = profile.endpoint.replace(/\/+$/, '');
+
+        // Build the real request payload for the tracker API
+        const trackerPayload = {
+            model:       profile.model,
+            messages: [
+                { role: 'system', content: TRACKER_SYSTEM_PROMPT },
+                { role: 'user',   content: userMessage },
+            ],
+            max_tokens:  2000,
+            temperature: 0.2,
+            stream:      false,
+        };
+
+        // Proxy wrapper: ST forwards this to `url` server-side
+        const proxyPayload = {
+            url:     `${base}/chat/completions`,
             method:  'POST',
             headers: {
                 'Content-Type': 'application/json',
                 ...(profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {}),
             },
-            body: JSON.stringify({
-                model:       profile.model,
-                messages: [
-                    { role: 'system', content: TRACKER_SYSTEM_PROMPT },
-                    { role: 'user',   content: userMessage },
-                ],
-                max_tokens:  2000,
-                temperature: 0.2,
-                stream:      false,
-            }),
+            body: JSON.stringify(trackerPayload),
+        };
+
+        // First try ST's built-in proxy (works on all platforms including iOS Safari)
+        let response = await fetch('/api/proxy', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(proxyPayload),
         });
+
+        // If ST proxy isn't available (older ST builds), fall back to direct fetch
+        if (response.status === 404) {
+            console.warn('[enaennTracker] /api/proxy not found, falling back to direct fetch (may fail on iOS Safari).');
+            response = await fetch(`${base}/chat/completions`, {
+                method:  'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {}),
+                },
+                body: JSON.stringify(trackerPayload),
+            });
+        }
 
         if (!response.ok) {
             const errText = await response.text();
@@ -344,13 +376,14 @@ async function insertTrackerMessage(content) {
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
 
-    // FIX #1: Store a plain placeholder in `mes` so ST's messageFormatting()
-    // never sees or escapes the real HTML. We inject the real HTML into the
-    // DOM ourselves after addOneMessage has finished rendering.
+    // is_system: false → keeps the tracker visible to the AI in context.
+    // mes is a plain whitespace placeholder so ST's messageFormatting() never
+    // escapes the real HTML. We inject the real HTML into the DOM ourselves
+    // after addOneMessage has finished rendering.
     const mesObj = {
         name:      'Tracker',
         is_user:   false,
-        is_system: true,
+        is_system: false,
         mes:       ' ',          // plain whitespace placeholder — never shown
         send_date: new Date().toLocaleString(),
         extra: {
