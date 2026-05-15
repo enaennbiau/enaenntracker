@@ -267,19 +267,9 @@ async function enforceWindow() {
     for (const idx of toRestore) { if (chat[idx]?.extra?.archived)  restoreTrackerAt(idx); }
 }
 
-// ─── TRACKER API CALL ─────────────────────────────────────────────────────────
+// ─── BUILD THE USER MESSAGE ────────────────────────────────────────────────────
 
-async function callTrackerAPI() {
-    const profile = getActiveProfile();
-    if (!profile) {
-        toastr.warning('enaennTracker: No API profile selected. Open Extensions → enaennTracker.');
-        return null;
-    }
-    if (!profile.endpoint || !profile.model) {
-        toastr.warning('enaennTracker: Active profile is missing Endpoint URL or Model name.');
-        return null;
-    }
-
+function buildUserMessage() {
     const recentRoleplay = chat
         .filter(m => !m.extra?.[TRACKER_FLAG])
         .slice(-(S().contextMessages));
@@ -292,37 +282,80 @@ async function callTrackerAPI() {
         ? `PREVIOUS TRACKER STATE:\n${S().lastTracker}`
         : 'No previous tracker state. Initialize a fresh one from the chat context.';
 
-    const userMessage =
+    return (
         `${prevState}\n\n---\n\n` +
         `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
-        `Output the updated tracker wrapped in <div class="enaenn-tracker-block">...</div>. Nothing else.`;
+        `Output the updated tracker wrapped in <div class="enaenn-tracker-block">...</div>. Nothing else.`
+    );
+}
+
+// ─── TRACKER API CALL — VIA ST BACKEND PROXY (mobile-safe) ──────────────────
+//
+// Instead of fetching the external API directly from the browser (which causes
+// CORS / mixed-content failures on iOS Safari and other strict mobile browsers),
+// we POST to ST's own backend endpoint:
+//
+//   POST /api/backends/chat-completions/generate
+//
+// ST's Node server then makes the outbound call to your chosen API, so the
+// browser only ever talks to the ST origin it's already connected to.
+// We use getRequestHeaders() — imported from script.js — which attaches the
+// required CSRF token so ST's middleware accepts the request.
+//
+// The body mirrors what ST's own OpenAI-compatible "Custom" source sends:
+//   chat_completion_source = 'custom'
+//   reverse_proxy          = your endpoint base URL
+//   proxy_password         = your API key
+//   model                  = your model name
+//
+// This is exactly the mechanism Meddler uses for its "Quick API" feature.
+
+async function callViaSTBackend(userMessage) {
+    const profile = getActiveProfile();
+    if (!profile) {
+        toastr.warning('enaennTracker: No API profile selected. Open Extensions → enaennTracker.');
+        return null;
+    }
+    if (!profile.endpoint || !profile.model) {
+        toastr.warning('enaennTracker: Active profile is missing Endpoint URL or Model name.');
+        return null;
+    }
 
     try {
-        const base     = profile.endpoint.replace(/\/+$/, '');
-        const response = await fetch(`${base}/chat/completions`, {
+        const response = await fetch('/api/backends/chat-completions/generate', {
             method:  'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {}),
-            },
+            headers: getRequestHeaders(),   // ← attaches Content-Type + CSRF token
             body: JSON.stringify({
-                model:       profile.model,
+                // Tell ST to use the generic OpenAI-compatible path
+                chat_completion_source: 'custom',
+                // ST forwards these to the external endpoint server-side
+                reverse_proxy:   profile.endpoint.replace(/\/+$/, ''),
+                proxy_password:  profile.apiKey || '',
+                model:           profile.model,
+                // The actual messages payload
                 messages: [
                     { role: 'system', content: TRACKER_SYSTEM_PROMPT },
                     { role: 'user',   content: userMessage },
                 ],
-                max_tokens:  1500,
-                temperature: 0.2,
-                stream:      false,
+                max_tokens:        1500,
+                temperature:       0.2,
+                stream:            false,
+                // These are required by ST's schema but we don't need them;
+                // passing safe defaults keeps the backend happy
+                top_p:             1,
+                presence_penalty:  0,
+                frequency_penalty: 0,
             }),
         });
 
         if (!response.ok) {
             const errText = await response.text();
-            throw new Error(`HTTP ${response.status}: ${errText.slice(0, 300)}`);
+            throw new Error(`ST backend returned HTTP ${response.status}: ${errText.slice(0, 300)}`);
         }
 
         const data = await response.json();
+
+        // ST's /generate endpoint returns the same shape as OpenAI
         return data.choices?.[0]?.message?.content?.trim() ?? null;
 
     } catch (err) {
@@ -332,10 +365,16 @@ async function callTrackerAPI() {
     }
 }
 
+// ─── UNIFIED TRACKER API CALL ─────────────────────────────────────────────────
+//
+// Routes through ST's own backend endpoint — mobile-safe on all browsers.
+
+async function callTrackerAPI() {
+    return callViaSTBackend(buildUserMessage());
+}
+
 // ─── INSERT TRACKER MESSAGE ───────────────────────────────────────────────────
 
-// Declared at module scope so it is always defined before use.
-// Assigned during init once we confirm the import succeeded.
 let _addOneMessage = null;
 
 async function insertTrackerMessage(content) {
@@ -343,22 +382,15 @@ async function insertTrackerMessage(content) {
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
 
-    // ── KEY FIX ──────────────────────────────────────────────────────────────
-    // is_system: true  → ST treats the message as a UI-only hidden note and
-    //                    STRIPS it from the prompt sent to the main API.
-    // is_system: false + extra.type = 'narrator' → renders as a narrator card
-    //                    in the UI AND is included in the chat history context
-    //                    sent to both the main model and our tracker API.
-    // ─────────────────────────────────────────────────────────────────────────
     const mesObj = {
         name:      'Tracker',
         is_user:   false,
-        is_system: false,           // ← must be false so ST includes it in context
+        is_system: false,
         mes:       wrapped,
         send_date: new Date().toLocaleString(),
         extra: {
             [TRACKER_FLAG]: true,
-            type:           'narrator', // ← tells ST to style it as a narrator message
+            type:           'narrator',
             fullContent:    wrapped,
             archived:       false,
             token_count:    0,
@@ -368,11 +400,9 @@ async function insertTrackerMessage(content) {
     chat.push(mesObj);
     const mesId = chat.length - 1;
 
-    // Use ST's addOneMessage if it was successfully loaded during init
     if (_addOneMessage) {
         try {
             await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
-            // Overwrite the rendered text with our raw HTML so styles apply
             $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(wrapped);
             const $chat = $('#chat');
             $chat.scrollTop($chat[0].scrollHeight);
@@ -496,6 +526,10 @@ const SETTINGS_HTML = `
       <hr />
 
       <div class="enaenn-gap" style="font-weight:bold;">API Profiles</div>
+      <div style="font-size:0.78em; opacity:0.6; margin-bottom:6px;">
+        Requests are routed through ST's server — works on all browsers including iOS Safari.
+      </div>
+
       <div class="flex-container flexGap5 enaenn-gap">
         <select id="enaennTracker_profileSelect" class="text_pole flex1"></select>
         <button id="enaennTracker_addProfile"    class="menu_button" title="New profile">➕</button>
@@ -592,9 +626,6 @@ function addToolbarButton() {
 jQuery(async () => {
     initSettings();
 
-    // Try to assign addOneMessage from the static import; fall back to dynamic
-    // import if the static binding came in as undefined (can happen depending
-    // on ST version / bundling order).
     if (typeof addOneMessage === 'function') {
         _addOneMessage = addOneMessage;
         console.log('[enaennTracker] addOneMessage loaded via static import.');
