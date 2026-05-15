@@ -69,7 +69,7 @@ Use EXACTLY this structure (fill values, keep all class names):
   <details class="enaenn-section">
     <summary>💖 AGENTS PRESENT</summary>
     <div class="enaenn-agents">
-     [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. USER IS NOT AN AGENT! Don’t include them here. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).
+     [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. USER IS NOT AN AGENT! Don't include them here. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).
       If user is alone in the current scene: <div class="enaenn-agent-card"><div class="enaenn-agent-name">No agents present.</div></div>]
      <div class="enaenn-agent-card">
        <div class="enaenn-agent-name">[♀️ or ♂️] [Name] ❖ [Attire and its current state, concisely]</div>
@@ -343,14 +343,22 @@ async function insertTrackerMessage(content) {
         ? content
         : `<div class="enaenn-tracker-block">${content}</div>`;
 
+    // ── KEY FIX ──────────────────────────────────────────────────────────────
+    // is_system: true  → ST treats the message as a UI-only hidden note and
+    //                    STRIPS it from the prompt sent to the main API.
+    // is_system: false + extra.type = 'narrator' → renders as a narrator card
+    //                    in the UI AND is included in the chat history context
+    //                    sent to both the main model and our tracker API.
+    // ─────────────────────────────────────────────────────────────────────────
     const mesObj = {
         name:      'Tracker',
         is_user:   false,
-        is_system: true,
+        is_system: false,           // ← must be false so ST includes it in context
         mes:       wrapped,
         send_date: new Date().toLocaleString(),
         extra: {
             [TRACKER_FLAG]: true,
+            type:           'narrator', // ← tells ST to style it as a narrator message
             fullContent:    wrapped,
             archived:       false,
             token_count:    0,
