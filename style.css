@@ -38,7 +38,7 @@
 #enaennTracker_toolbarBtn:active { opacity: 0.4; }
 
 /* ══════════════════════════════════════════════════
-   TRACKER CARD — lives inside .enaenn-tracker-block
+   TRACKER CARD — .enaenn-tracker-block
    ══════════════════════════════════════════════════ */
 
 .enaenn-tracker-block {
@@ -49,22 +49,20 @@
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 6px;
     padding: 4px 0;
 }
 
 /* ── Location header ─────────────────────────────── */
 .enaenn-location {
-    display: flex;
-    align-items: center;
-    gap: 8px;
     padding: 8px 12px;
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
-    border-radius: 12px;
+    border-radius: 10px;
     font-weight: 600;
-    font-size: 0.9em;
-    opacity: 0.85;
+    font-size: 0.88em;
+    line-height: 1.4;
+    opacity: 0.9;
     position: relative;
     overflow: hidden;
 }
@@ -74,247 +72,278 @@
     top: 0; left: 0; right: 0;
     height: 1px;
     background: linear-gradient(90deg, transparent,
-        color-mix(in srgb, var(--SmartThemeBodyColor) 35%, transparent), transparent);
+        color-mix(in srgb, var(--SmartThemeBodyColor) 30%, transparent), transparent);
     pointer-events: none;
 }
 
-/* ── Agent cards row ─────────────────────────────── */
-.enaenn-agents {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
+/* ══════════════════════════════════════════════════
+   TAB SYSTEM
+   ══════════════════════════════════════════════════ */
+
+/* Hide the actual radio inputs */
+.enaenn-tabs-box input[type="radio"] {
+    display: none;
 }
 
-.enaenn-agent-card {
-    flex: 1;
-    min-width: 190px;
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 3%, transparent);
+/* Tab container */
+.enaenn-tabs-box {
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
-    border-radius: 14px;
-    padding: 12px;
+    border-radius: 10px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
+}
+
+/* ── Tab label bar ───────────────────────────────── */
+.enaenn-tab-labels {
+    display: flex;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+}
+
+.enaenn-tab-labels label {
+    flex: 1;
+    padding: 8px 4px;
+    text-align: center;
+    cursor: pointer;
+    opacity: 0.45;
+    font-weight: 600;
+    font-size: 0.8em;
+    transition: opacity 0.2s, background 0.2s;
+    border-right: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    user-select: none;
+    white-space: nowrap;
+}
+.enaenn-tab-labels label:last-child { border-right: none; }
+.enaenn-tab-labels label:hover { opacity: 0.75; }
+
+/* Active tab label — input:checked ~ sibling selectors */
+.enaenn-tabs-box input:nth-of-type(1):checked ~ .enaenn-tab-labels label:nth-of-type(1),
+.enaenn-tabs-box input:nth-of-type(2):checked ~ .enaenn-tab-labels label:nth-of-type(2),
+.enaenn-tabs-box input:nth-of-type(3):checked ~ .enaenn-tab-labels label:nth-of-type(3) {
+    opacity: 1;
+    color: var(--SmartThemeBodyColor);
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--SmartThemeBodyColor) 60%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+}
+
+/* ── Tab content panes ───────────────────────────── */
+.enaenn-tab-content {
+    /* no extra styling needed */
+}
+
+/* All panes hidden by default */
+.enaenn-tp1,
+.enaenn-tp2,
+.enaenn-tp3 {
+    display: none;
+    box-sizing: border-box;
+}
+
+/* Show the active pane based on which radio is checked */
+.enaenn-tabs-box input:nth-of-type(1):checked ~ .enaenn-tab-content .enaenn-tp1 { display: block; }
+.enaenn-tabs-box input:nth-of-type(2):checked ~ .enaenn-tab-content .enaenn-tp2 { display: block; }
+.enaenn-tabs-box input:nth-of-type(3):checked ~ .enaenn-tab-content .enaenn-tp3 { display: block; }
+
+/* ══════════════════════════════════════════════════
+   AGENT GRID — shared by Tab 1 and Tab 2
+   ══════════════════════════════════════════════════ */
+
+.enaenn-agents-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+/* ── Agent slot (filled) ─────────────────────────── */
+.enaenn-agent-slot {
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 11%, transparent);
+    border-radius: 8px;
+    padding: 8px;
     display: flex;
     flex-direction: column;
-    gap: 7px;
+    gap: 5px;
     box-sizing: border-box;
+    min-width: 0; /* allow grid cell to shrink */
     position: relative;
     overflow: hidden;
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
 }
-.enaenn-agent-card::before {
+.enaenn-agent-slot::before {
     content: '';
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 1px;
     background: linear-gradient(90deg, transparent,
-        color-mix(in srgb, var(--SmartThemeBodyColor) 30%, transparent), transparent);
+        color-mix(in srgb, var(--SmartThemeBodyColor) 25%, transparent), transparent);
     pointer-events: none;
 }
 
+/* ── Empty slot ──────────────────────────────────── */
+.enaenn-slot-empty {
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 1%, transparent);
+    border: 1px dashed color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+    border-radius: 8px;
+    min-height: 40px;
+}
+.enaenn-slot-empty::before { display: none; }
+
+/* ── Agent name ──────────────────────────────────── */
 .enaenn-agent-name {
-    font-size: 1.25em;
+    font-size: 0.95em;
     font-weight: 800;
-    letter-spacing: 0.3px;
-    margin-bottom: 1px;
+    letter-spacing: 0.2px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
+/* ── Agent attire ────────────────────────────────── */
 .enaenn-agent-attire {
-    font-size: 0.82em;
-    opacity: 0.6;
-    display: flex;
-    align-items: flex-start;
-    gap: 5px;
-    padding-bottom: 7px;
-    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+    font-size: 0.72em;
+    opacity: 0.55;
     line-height: 1.3;
+    padding-bottom: 5px;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 /* ── Vitals ──────────────────────────────────────── */
 .enaenn-vitals {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
 }
 
 .enaenn-vital-row {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-size: 0.83em;
+    gap: 4px;
+    font-size: 0.75em;
 }
 
 .enaenn-vital-emoji {
-    width: 16px;
+    width: 14px;
     text-align: center;
     flex-shrink: 0;
-    font-size: 1em;
+    font-size: 0.95em;
 }
 
 .enaenn-vital-bar-wrap {
     flex: 1;
-    height: 4px;
+    height: 3px;
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
+    min-width: 0;
 }
 
 .enaenn-vital-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 2px;
 }
 
-/* Color classes — pick based on value + polarity */
-.enaenn-fill-ok   { background: linear-gradient(90deg, #3d8b5c, #5cb07a); }
-.enaenn-fill-warn { background: linear-gradient(90deg, #b07d28, #d9a040); }
-.enaenn-fill-crit { background: linear-gradient(90deg, #8b3030, #b04848); }
+/* Color classes */
+.enaenn-fill-ok      { background: linear-gradient(90deg, #3d8b5c, #5cb07a); }
+.enaenn-fill-warn    { background: linear-gradient(90deg, #b07d28, #d9a040); }
+.enaenn-fill-crit    { background: linear-gradient(90deg, #8b3030, #b04848); }
 .enaenn-fill-arousal { background: linear-gradient(90deg, #7D2A40, #A94064); }
 
 .enaenn-vital-val {
-    font-size: 0.8em;
+    font-size: 0.85em;
     font-weight: 700;
-    min-width: 38px;
+    min-width: 30px;
     text-align: right;
     flex-shrink: 0;
     opacity: 0.9;
 }
 
 .enaenn-vital-delta {
-    font-size: 0.75em;
-    opacity: 0.5;
-    min-width: 42px;
+    font-size: 0.78em;
+    opacity: 0.4;
+    min-width: 34px;
     text-align: right;
     flex-shrink: 0;
 }
 
 /* ── Condition tag ───────────────────────────────── */
 .enaenn-condition {
-    font-size: 0.8em;
-    padding: 3px 8px;
-    background: color-mix(in srgb, #b04848 18%, transparent);
-    border: 1px solid color-mix(in srgb, #b04848 28%, transparent);
-    border-radius: 8px;
+    font-size: 0.72em;
+    padding: 3px 6px;
+    background: color-mix(in srgb, #b04848 15%, transparent);
+    border: 1px solid color-mix(in srgb, #b04848 25%, transparent);
+    border-radius: 6px;
     line-height: 1.3;
 }
 
 /* ── Active impulse ──────────────────────────────── */
 .enaenn-impulse {
-    font-size: 0.82em;
-    opacity: 0.7;
-    padding-top: 5px;
+    font-size: 0.72em;
+    opacity: 0.65;
+    padding-top: 4px;
     border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
-    display: flex;
-    gap: 5px;
-    align-items: flex-start;
     line-height: 1.3;
-}
-
-/* ── Collapsible sections ────────────────────────── */
-.enaenn-section {
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
-    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
-    border-radius: 12px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
 }
 
-.enaenn-section > summary {
-    padding: 8px 12px;
-    cursor: pointer;
-    font-weight: 700;
-    font-size: 0.87em;
-    list-style: none;
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    opacity: 0.78;
-    user-select: none;
-    transition: opacity 0.15s;
-}
-.enaenn-section > summary:hover { opacity: 1; }
-.enaenn-section > summary::-webkit-details-marker { display: none; }
-.enaenn-section > summary::after {
-    content: '\f078';
-    font-family: 'Font Awesome 6 Free';
-    font-weight: 900;
-    margin-left: auto;
-    font-size: 0.72em;
-    opacity: 0.55;
-    transition: transform 0.2s;
-}
-.enaenn-section[open] > summary::after { transform: rotate(180deg); }
-.enaenn-section[open] > summary {
-    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
-}
-
-.enaenn-section-body {
-    padding: 8px 12px 11px;
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-}
-
-/* ── Off-screen agent rows ───────────────────────── */
-.enaenn-offscreen-row {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    font-size: 0.84em;
-    padding: 5px 0;
-    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
-}
-.enaenn-offscreen-row:last-child {
-    border-bottom: none;
-    padding-bottom: 0;
-}
-.enaenn-offscreen-name  { font-weight: 700; }
-.enaenn-offscreen-vitals { opacity: 0.65; font-size: 0.92em; margin-top: 1px; }
-
-/* ── Relationship matrix ─────────────────────────── */
-.enaenn-rel-block {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 3px 0;
-}
-
-.enaenn-rel-separator {
-    height: 1px;
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
-    margin: 4px 0;
-}
+/* ══════════════════════════════════════════════════
+   RELATIONSHIP MATRIX — Tab 2
+   .enaenn-agent-slot reused as card container
+   ══════════════════════════════════════════════════ */
 
 .enaenn-rel-title {
+    font-size: 0.72em;
     font-weight: 800;
-    font-size: 0.85em;
-    opacity: 0.65;
+    opacity: 0.55;
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-bottom: 4px;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
 }
 
 .enaenn-rel-main {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.9em;
+    gap: 5px;
+    font-size: 0.8em;
     font-weight: 600;
+    flex-wrap: wrap;
+}
+.enaenn-rel-main > span:first-child {
+    width: 100%;
+    font-size: 0.95em;
+    line-height: 1.2;
 }
 
 .enaenn-rel-bar-wrap {
     flex: 1;
-    height: 4px;
+    height: 3px;
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
+    min-width: 0;
 }
 .enaenn-rel-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 2px;
     background: linear-gradient(90deg, #8C7A9E, #B6A6CA);
 }
 
 .enaenn-rel-val {
-    font-size: 0.8em;
+    font-size: 0.78em;
     font-weight: 700;
-    opacity: 0.75;
+    opacity: 0.65;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -323,22 +352,23 @@
     display: flex;
     flex-direction: column;
     gap: 3px;
-    padding-left: 2px;
+    margin-top: 2px;
 }
 
 .enaenn-rel-moment-row {
     display: flex;
     align-items: center;
-    gap: 7px;
-    font-size: 0.83em;
+    gap: 5px;
+    font-size: 0.75em;
     opacity: 0.85;
 }
 .enaenn-rel-moment-bar-wrap {
     flex: 1;
-    height: 3px;
+    height: 2px;
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
     border-radius: 2px;
     overflow: hidden;
+    min-width: 0;
 }
 .enaenn-rel-moment-fill {
     height: 100%;
@@ -348,24 +378,98 @@
 .enaenn-rel-moment-val {
     font-size: 0.85em;
     font-weight: 700;
-    opacity: 0.7;
-    min-width: 22px;
+    opacity: 0.65;
+    min-width: 20px;
     text-align: right;
     flex-shrink: 0;
 }
 
 .enaenn-rel-stage {
-    font-size: 0.8em;
-    opacity: 0.55;
+    font-size: 0.7em;
+    opacity: 0.45;
     font-style: italic;
     margin-top: 1px;
+    line-height: 1.3;
 }
 
-/* ── Future plans ────────────────────────────────── */
+/* ══════════════════════════════════════════════════
+   OFF-SCREEN AGENTS — Tab 3
+   ══════════════════════════════════════════════════ */
+
+.enaenn-offscreen-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.82em;
+    padding: 6px 4px;
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+}
+.enaenn-offscreen-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+.enaenn-offscreen-name {
+    font-weight: 700;
+    line-height: 1.3;
+}
+.enaenn-offscreen-vitals {
+    opacity: 0.6;
+    font-size: 0.9em;
+    margin-top: 1px;
+    line-height: 1.4;
+}
+
+/* ══════════════════════════════════════════════════
+   FUTURE PLANS — footer details element
+   ══════════════════════════════════════════════════ */
+
+.enaenn-plans {
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    border-radius: 10px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
+}
+
+.enaenn-plans > summary {
+    padding: 7px 12px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.82em;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    opacity: 0.7;
+    user-select: none;
+    transition: opacity 0.15s;
+}
+.enaenn-plans > summary:hover { opacity: 1; }
+.enaenn-plans > summary::-webkit-details-marker { display: none; }
+.enaenn-plans > summary::after {
+    content: '\f078';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    margin-left: auto;
+    font-size: 0.7em;
+    opacity: 0.5;
+    transition: transform 0.2s;
+}
+.enaenn-plans[open] > summary::after { transform: rotate(180deg); }
+.enaenn-plans[open] > summary {
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
+}
+
+.enaenn-plans-body {
+    padding: 6px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
 .enaenn-plan-row {
     display: flex;
     gap: 9px;
-    font-size: 0.85em;
+    font-size: 0.82em;
     align-items: flex-start;
     padding: 3px 0;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
@@ -377,7 +481,7 @@
     opacity: 0.85;
     flex-shrink: 0;
 }
-.enaenn-plan-desc { opacity: 0.75; line-height: 1.3; }
+.enaenn-plan-desc { opacity: 0.7; line-height: 1.3; }
 
 /* ── Archived tracker placeholder ────────────────── */
 .enaenn-tracker-archived {
