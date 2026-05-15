@@ -20,6 +20,7 @@ import {
     saveSettingsDebounced,
     chat,
     addOneMessage,
+    getRequestHeaders,
 } from '../../../../script.js';
 
 import {
@@ -301,16 +302,17 @@ async function callTrackerAPI() {
         `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
         `Output the updated tracker card. HTML only, nothing else.`;
 
-    // Route the request through SillyTavern's backend proxy instead of calling
-    // the external API directly from the browser. This fixes Safari on iOS
-    // blocking direct fetch() calls to local/Tailscale HTTP addresses
-    // ("Load failed") due to its strict mixed-content / local network policy.
-    // ST's /api/proxy endpoint forwards the request server-side, which has
-    // no such restriction.
+    // Route through ST's CORS proxy so the request is made server-side.
+    // This fixes Safari on iOS blocking direct fetch() to local/Tailscale
+    // HTTP addresses ("Load failed").
+    //
+    // ST's proxy format:  GET/POST /proxy/<encoded-target-url>
+    // All ST API calls require getRequestHeaders() which injects the CSRF
+    // token automatically — that's what was causing the 403 Forbidden.
     try {
-        const base = profile.endpoint.replace(/\/+$/, '');
+        const base       = profile.endpoint.replace(/\/+$/, '');
+        const targetUrl  = `${base}/chat/completions`;
 
-        // Build the real request payload for the tracker API
         const trackerPayload = {
             model:       profile.model,
             messages: [
@@ -322,28 +324,33 @@ async function callTrackerAPI() {
             stream:      false,
         };
 
-        // Proxy wrapper: ST forwards this to `url` server-side
-        const proxyPayload = {
-            url:     `${base}/chat/completions`,
-            method:  'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(profile.apiKey ? { Authorization: `Bearer ${profile.apiKey}` } : {}),
-            },
-            body: JSON.stringify(trackerPayload),
+        // getRequestHeaders() provides Content-Type + X-CSRF-Token + session
+        // cookie automatically — required for every ST backend endpoint.
+        const stHeaders = {
+            ...getRequestHeaders(),
+            // Forward the tracker API key if provided
+            ...(profile.apiKey ? { 'X-ST-Proxy-Authorization': `Bearer ${profile.apiKey}` } : {}),
         };
 
-        // First try ST's built-in proxy (works on all platforms including iOS Safari)
-        let response = await fetch('/api/proxy', {
+        // ST's CORS proxy: /proxy/<url-encoded target>
+        // The server fetches the target URL and streams the response back.
+        let response = await fetch(`/proxy/${encodeURIComponent(targetUrl)}`, {
             method:  'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body:    JSON.stringify(proxyPayload),
+            headers: {
+                ...stHeaders,
+                // Override content-type for the proxied body
+                'Content-Type': 'application/json',
+                // Pass the API key in the standard header for the proxy to forward
+                ...(profile.apiKey ? { 'Authorization': `Bearer ${profile.apiKey}` } : {}),
+            },
+            body: JSON.stringify(trackerPayload),
         });
 
-        // If ST proxy isn't available (older ST builds), fall back to direct fetch
+        // If proxy returns 404 (older ST build without CORS proxy), fall back
+        // to a direct fetch. This will work on desktop but may fail on iOS Safari.
         if (response.status === 404) {
-            console.warn('[enaennTracker] /api/proxy not found, falling back to direct fetch (may fail on iOS Safari).');
-            response = await fetch(`${base}/chat/completions`, {
+            console.warn('[enaennTracker] /proxy/ not available, falling back to direct fetch (may fail on iOS Safari).');
+            response = await fetch(targetUrl, {
                 method:  'POST',
                 headers: {
                     'Content-Type': 'application/json',
