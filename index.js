@@ -53,7 +53,7 @@ STRICT OUTPUT RULES
 ════════════════════════════════════
 - Output starts with <div class="enaenn-tracker-block"> and ends with </div>.
 - No markdown, no code fences, no commentary before or after.
-- Never include the user/{{user}} as an agent. Track only characters you control.
+- Never include user/{{user}}'s vitals into the tracker. USER IS NOT AN AGENT, avoid tracking their vitals! Track {{char}} and NPCs, if they are valuable, but NEVER user.
 - If no previous tracker state exists, initialize fresh from chat context.
 
 ════════════════════════════════════
@@ -64,26 +64,29 @@ Use EXACTLY this structure (fill values, keep all class names):
 
 <div class="enaenn-tracker-block">
 
-  <div class="enaenn-location">📍 [Concise 1-sentence description of agents' spatial positions]</div>
-
-  <div class="enaenn-agents">
-    [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).]
-
-    <div class="enaenn-agent-card">
-      <div class="enaenn-agent-name">[♀️ or ♂️] [Name] ❖ [Attire and its current state, concisely]</div>
-      <div class="enaenn-vitals">
+  <div class="enaenn-location">📍 [Concise 1-2 sentence description of present agents' and user's spatial positions]</div>
+  
+  <details class="enaenn-section">
+    <summary>💖 AGENTS PRESENT</summary>
+    <div class="enaenn-agents">
+     [One .enaenn-agent-card per on-screen agent. Add a new card when a new agent enters the scene. Keep cards for agents already present. Remove a card only when the agent leaves the scene entirely (→ move to off-screen section instead).
+      If user is alone: <div class="enaenn-agent-card"><div class="enaenn-agent-name">No agents present.</div></div>]
+     <div class="enaenn-agent-card">
+       <div class="enaenn-agent-name">[♀️ or ♂️] [Name] ❖ [Attire and its current state, concisely]</div>
+       <div class="enaenn-vitals">
         [7 vital rows — see VITAL ROW FORMAT below]
-      </div>
-      [Only if an active condition exists (injury / illness / intoxication / pain / medication / temperature discomfort):
-      <div class="enaenn-condition">🩹 [Concise condition description and how it affects the agent]</div>]
-      <div class="enaenn-impulse">🎯 [The agent's most active current drive or urge]</div>
-    </div>
-  </div>
-
+       </div>
+       [Only if an active condition exists (injury / illness / intoxication / pain / medication / temperature discomfort):
+       <div class="enaenn-condition">🩹 [Concise condition description and how it affects the agent]</div>]
+       <div class="enaenn-impulse">🎯 [The agent's most active current drive or urge]</div>
+     </div>
+   </div>
+ </details>
+ 
   <details class="enaenn-section">
     <summary>🌍 Off-screen Agents</summary>
     <div class="enaenn-section-body">
-      [One .enaenn-offscreen-row per agent who has a relationship with the user but is currently off-screen.
+      [One .enaenn-offscreen-row per agent who has a relationship with the user but is currently off-screen. Check if the NPC is still relevant to the simulation — if they hadn't interacted with user for a week and more of in-game time, stop tracking them entirely. {{char}} is an exception to this rule.
        If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
       <div class="enaenn-offscreen-row">
         <div class="enaenn-offscreen-name">[♀️/♂️] [Name] — 📍[Location] // [What they are doing right now]</div>
@@ -190,15 +193,15 @@ Multiple vitals can shift at once from one event (e.g. sex drops 🚿 and 🍴, 
 RELATIONSHIP MATRIX RULES
 ════════════════════════════════════
 
-Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major event occurs. Naturally evolves at 0 or 1000 into its successor/predecessor. Large deductions are allowed during seriously negative events — amount depends on agent personality, relationship stage, and severity. Never rush development.
+Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs. Naturally evolves at 0 or 1000 into its successor/predecessor. Deductions are allowed during negative events — amount depends on agent personality, relationship stage, and severity pf user's deed. Never rush Main's development.
 
 In The Moment feelings (0–100, max 4): tied to current events.
   At 100 or 0 → transform into natural successor/predecessor.
-  Negative transformation → deduct 1–20 from Main. Positive → add 1–5 to Main.
+  Negative feeling transformation → deduct 1–20 from Main. Positive feeling → add 1–5 to Main.
   Dissipate feelings that no longer reflect current events.
 
 Relationship stage + "known for" duration: track separately for each agent.
-Off-screen agents: show only Main feeling, status, and known duration in the matrix.
+Off-screen agents: show only Main feeling, status, and "known fior" duration in the matrix.
 Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
 Choose ALL feeling names as the AGENT would personally describe them.`;
 
