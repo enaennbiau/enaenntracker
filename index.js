@@ -48,20 +48,20 @@ STRICT OUTPUT RULES
 TAB RULES — READ CAREFULLY
 ════════════════════════════════════
 
-TAB 1 — Agents Present (3-slot grid):
-- Only agents PHYSICALLY IN THE CURRENT SCENE go here (never the user).
-- Output EXACTLY 3 .enaenn-agent-slot children. Fill left-to-right; pad unused slots with the empty-slot div.
-- If the user is alone (no agents in scene): output ONE card spanning the full row with class "enaenn-agent-slot enaenn-alone" containing only: <div class="enaenn-agent-name">No agents present.</div> — then TWO empty slots.
+TAB 1 — Agents Present (FLAT LIST, one row per agent):
+- One .enaenn-agent-row per agent PHYSICALLY IN THE CURRENT SCENE (never the user).
+- No grid. Just a stacked vertical list of rows.
+- If the user is alone (no agents): output <div class="enaenn-alone-msg">No agents present.</div>
 
-TAB 2 — Relationship Matrix (always populated):
-- ALWAYS shows ALL tracked agents with a relationship to the user — both on-screen AND off-screen.
-- This tab is NEVER empty. Even when the user is alone, all relationships are still shown here.
-- Use a flat list of .enaenn-rel-block divs separated by .enaenn-rel-separator divs. Do NOT use the grid layout.
+TAB 2 — Relationship Matrix (3-COLUMN GRID, always populated):
+- Shows ALL tracked agents with a relationship to the user — both on-screen AND off-screen.
+- This tab is NEVER empty. Use .enaenn-agents-grid with one .enaenn-agent-slot per agent.
+- The grid wraps naturally; no need to pad with empty slots.
 
 TAB 3 — Off-screen Agents (text list):
 - One .enaenn-offscreen-row per agent NOT in the current scene who has a relationship with the user.
-- Vitals MUST be written as SHORT TEXT LABELS ONLY — no percentages, no calculations, no bar values.
-  Use exactly these label words: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm
+- Vitals MUST be SHORT TEXT LABELS ONLY — no percentages, no numbers, no calculations.
+  Allowed words: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm
 - Format: 🍴(label) | 😴(label) | 🚿(label) | 🚽(label) | 💧(label) | 🔥(label) | 🧠(label) // 🎯 [impulse]
 
 ════════════════════════════════════
@@ -86,38 +86,33 @@ FULL HTML STRUCTURE
     <div class="enaenn-tab-content">
 
       <div class="enaenn-tp1">
-        <div class="enaenn-agents-grid">
 
-          [EXACTLY 3 children. Example when 1 agent present:]
-          <div class="enaenn-agent-slot">
-            <div class="enaenn-agent-name">[♀️/♂️] [Name]</div>
-            <div class="enaenn-agent-attire">👗 [Attire + state, concise]</div>
-            <details class="enaenn-vitals-fold" open>
-              <summary>Vitals</summary>
-              <div class="enaenn-vitals">
-                [7 vital rows — see VITAL ROW FORMAT below]
-              </div>
-            </details>
-            [Only if active condition: <div class="enaenn-condition">🩹 [condition]</div>]
-            <div class="enaenn-impulse">🎯 [current drive]</div>
+        [If alone: <div class="enaenn-alone-msg">No agents present.</div>]
+        [Otherwise: one .enaenn-agent-row per present agent:]
+
+        <div class="enaenn-agent-row">
+          <div class="enaenn-agent-header">
+            <span class="enaenn-agent-name">[♀️/♂️] [Name]</span>
+            <span class="enaenn-agent-attire">👗 [Attire + current state, concise]</span>
           </div>
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
-
-          [Example when user is alone:]
-          <div class="enaenn-agent-slot enaenn-alone"><div class="enaenn-agent-name">No agents present.</div></div>
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
-          <div class="enaenn-agent-slot enaenn-slot-empty"></div>
-
+          <details class="enaenn-vitals-fold">
+            <summary>Vitals</summary>
+            <div class="enaenn-vitals">
+              [7 vital rows — see VITAL ROW FORMAT below]
+            </div>
+          </details>
+          [Only if active condition: <div class="enaenn-condition">🩹 [condition and effect]</div>]
+          <div class="enaenn-impulse">🎯 [agent's most active current drive]</div>
         </div>
+
       </div>
 
       <div class="enaenn-tp2">
-        <div class="enaenn-rel-list">
+        <div class="enaenn-agents-grid">
 
-          [One .enaenn-rel-block per ALL tracked agents — on-screen and off-screen. Separate blocks with .enaenn-rel-separator. This section is NEVER empty.]
+          [One .enaenn-agent-slot per ALL tracked agents with a relationship to user. Grid wraps automatically — no empty slots needed.]
 
-          <div class="enaenn-rel-block">
+          <div class="enaenn-agent-slot">
             <div class="enaenn-rel-title">[Name] → [User]</div>
             <div class="enaenn-rel-main">
               <span>[Emoji] [Main feeling name as the AGENT would describe it]</span>
@@ -134,7 +129,7 @@ FULL HTML STRUCTURE
             </div>
             <div class="enaenn-rel-stage">Known [duration] · [Relationship stage]</div>
           </div>
-          <div class="enaenn-rel-separator"></div>
+
           [repeat for each tracked agent]
 
         </div>
@@ -142,7 +137,7 @@ FULL HTML STRUCTURE
 
       <div class="enaenn-tp3">
 
-        [One .enaenn-offscreen-row per off-screen agent with a relationship to the user. Vitals in SHORT TEXT LABELS only — no numbers. If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
+        [One .enaenn-offscreen-row per off-screen agent with a relationship to the user. Text-label vitals ONLY. If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
 
         <div class="enaenn-offscreen-row">
           <div class="enaenn-offscreen-name">[♀️/♂️] [Name] — 📍[Location] // [What they are doing]</div>

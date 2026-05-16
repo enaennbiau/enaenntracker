@@ -80,12 +80,8 @@
    TAB SYSTEM
    ══════════════════════════════════════════════════ */
 
-/* Hide the actual radio inputs */
-.enaenn-tabs-box input[type="radio"] {
-    display: none;
-}
+.enaenn-tabs-box input[type="radio"] { display: none; }
 
-/* Tab container */
 .enaenn-tabs-box {
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
     border-radius: 10px;
@@ -93,7 +89,6 @@
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
 }
 
-/* ── Tab label bar ───────────────────────────────── */
 .enaenn-tab-labels {
     display: flex;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
@@ -116,36 +111,205 @@
 .enaenn-tab-labels label:last-child { border-right: none; }
 .enaenn-tab-labels label:hover { opacity: 0.75; }
 
-/* Active tab label — input:checked ~ sibling selectors */
 .enaenn-tabs-box input:nth-of-type(1):checked ~ .enaenn-tab-labels label:nth-of-type(1),
 .enaenn-tabs-box input:nth-of-type(2):checked ~ .enaenn-tab-labels label:nth-of-type(2),
 .enaenn-tabs-box input:nth-of-type(3):checked ~ .enaenn-tab-labels label:nth-of-type(3) {
     opacity: 1;
     color: var(--SmartThemeBodyColor);
-    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--SmartThemeBodyColor) 60%, transparent);
+    box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--SmartThemeBodyColor) 55%, transparent);
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
 }
 
-/* ── Tab content panes ───────────────────────────── */
-.enaenn-tab-content {
-    /* no extra styling needed */
-}
-
-/* All panes hidden by default */
 .enaenn-tp1,
 .enaenn-tp2,
 .enaenn-tp3 {
     display: none;
+    padding: 8px;
     box-sizing: border-box;
 }
 
-/* Show the active pane based on which radio is checked */
 .enaenn-tabs-box input:nth-of-type(1):checked ~ .enaenn-tab-content .enaenn-tp1 { display: block; }
 .enaenn-tabs-box input:nth-of-type(2):checked ~ .enaenn-tab-content .enaenn-tp2 { display: block; }
 .enaenn-tabs-box input:nth-of-type(3):checked ~ .enaenn-tab-content .enaenn-tp3 { display: block; }
 
 /* ══════════════════════════════════════════════════
-   AGENT GRID — shared by Tab 1 and Tab 2
+   TAB 1 — AGENTS PRESENT (flat list)
+   ══════════════════════════════════════════════════ */
+
+.enaenn-alone-msg {
+    text-align: center;
+    padding: 18px;
+    opacity: 0.35;
+    font-style: italic;
+    font-size: 0.88em;
+}
+
+.enaenn-agent-row {
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 11%, transparent);
+    border-radius: 8px;
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    box-sizing: border-box;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.enaenn-agent-row:last-child { margin-bottom: 0; }
+.enaenn-agent-row::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent,
+        color-mix(in srgb, var(--SmartThemeBodyColor) 25%, transparent), transparent);
+    pointer-events: none;
+}
+
+.enaenn-agent-header {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.enaenn-agent-row .enaenn-agent-name {
+    font-size: 1.05em;
+    font-weight: 800;
+    letter-spacing: 0.2px;
+    flex-shrink: 0;
+}
+
+.enaenn-agent-row .enaenn-agent-attire {
+    font-size: 0.78em;
+    opacity: 0.5;
+    line-height: 1.3;
+    flex: 1;
+}
+
+/* ── Foldable vitals — "Details" style ──────────── */
+.enaenn-vitals-fold {
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.enaenn-vitals-fold > summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 5px 10px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
+    font-size: 0.78em;
+    font-weight: 700;
+    opacity: 0.7;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: opacity 0.15s, background 0.15s;
+}
+.enaenn-vitals-fold > summary:hover {
+    opacity: 1;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent);
+}
+.enaenn-vitals-fold > summary::-webkit-details-marker { display: none; }
+.enaenn-vitals-fold > summary::after {
+    content: '\f077';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    margin-left: auto;
+    font-size: 0.65em;
+    opacity: 0.5;
+    transition: transform 0.2s;
+}
+.enaenn-vitals-fold:not([open]) > summary::after { transform: rotate(180deg); }
+.enaenn-vitals-fold[open] > summary {
+    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent);
+}
+
+.enaenn-vitals-fold > .enaenn-vitals {
+    padding: 6px 10px;
+}
+
+/* ── Vitals rows ─────────────────────────────────── */
+.enaenn-vitals {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.enaenn-vital-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.82em;
+}
+
+.enaenn-vital-emoji {
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+    font-size: 1em;
+    filter: grayscale(1);
+    opacity: 0.65;
+}
+
+.enaenn-vital-bar-wrap {
+    flex: 1;
+    height: 4px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
+    border-radius: 3px;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.enaenn-vital-fill { height: 100%; border-radius: 3px; }
+
+.enaenn-fill-ok      { background: linear-gradient(90deg, #3d8b5c, #5cb07a); }
+.enaenn-fill-warn    { background: linear-gradient(90deg, #b07d28, #d9a040); }
+.enaenn-fill-crit    { background: linear-gradient(90deg, #8b3030, #b04848); }
+.enaenn-fill-arousal { background: linear-gradient(90deg, #7D2A40, #A94064); }
+
+.enaenn-vital-val {
+    font-size: 0.82em;
+    font-weight: 700;
+    min-width: 34px;
+    text-align: right;
+    flex-shrink: 0;
+    opacity: 0.9;
+}
+
+.enaenn-vital-delta {
+    font-size: 0.75em;
+    opacity: 0.4;
+    min-width: 40px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* ── Condition tag ───────────────────────────────── */
+.enaenn-condition {
+    font-size: 0.78em;
+    padding: 4px 8px;
+    background: color-mix(in srgb, #b04848 15%, transparent);
+    border: 1px solid color-mix(in srgb, #b04848 25%, transparent);
+    border-radius: 6px;
+    line-height: 1.4;
+}
+
+/* ── Active impulse ──────────────────────────────── */
+.enaenn-impulse {
+    font-size: 0.8em;
+    opacity: 0.65;
+    line-height: 1.3;
+    padding-top: 4px;
+    border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
+}
+
+/* ══════════════════════════════════════════════════
+   TAB 2 — RELATIONSHIP MATRIX (3-column grid)
    ══════════════════════════════════════════════════ */
 
 .enaenn-agents-grid {
@@ -156,7 +320,6 @@
     box-sizing: border-box;
 }
 
-/* ── Agent slot (filled) ─────────────────────────── */
 .enaenn-agent-slot {
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 4%, transparent);
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 11%, transparent);
@@ -166,7 +329,7 @@
     flex-direction: column;
     gap: 5px;
     box-sizing: border-box;
-    min-width: 0; /* allow grid cell to shrink */
+    min-width: 0;
     position: relative;
     overflow: hidden;
 }
@@ -176,178 +339,19 @@
     top: 0; left: 0; right: 0;
     height: 1px;
     background: linear-gradient(90deg, transparent,
-        color-mix(in srgb, var(--SmartThemeBodyColor) 25%, transparent), transparent);
+        color-mix(in srgb, var(--SmartThemeBodyColor) 22%, transparent), transparent);
     pointer-events: none;
 }
 
-/* ── "No agents present" card ────────────────────── */
-.enaenn-agent-slot.enaenn-alone {
-    grid-column: 1 / -1;
-    justify-content: center;
-    align-items: center;
-    min-height: 48px;
-    opacity: 0.45;
-    font-style: italic;
-    border-style: dashed;
-}
-.enaenn-agent-slot.enaenn-alone::before { display: none; }
-
-/* ── Foldable vitals inside agent card ───────────── */
-.enaenn-vitals-fold {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-}
-
-.enaenn-vitals-fold > summary {
-    list-style: none;
-    cursor: pointer;
-    font-size: 0.7em;
-    opacity: 0.45;
-    user-select: none;
-    padding: 2px 0;
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
-    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
-    margin-bottom: 3px;
-    transition: opacity 0.15s;
-}
-.enaenn-vitals-fold > summary:hover { opacity: 0.8; }
-.enaenn-vitals-fold > summary::-webkit-details-marker { display: none; }
-.enaenn-vitals-fold > summary::before {
-    content: '▸';
-    font-size: 0.85em;
-    transition: transform 0.15s;
-}
-.enaenn-vitals-fold[open] > summary::before { transform: rotate(90deg); }
-
-/* ── Relationship list (Tab 2 flat layout) ───────── */
-.enaenn-rel-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    padding: 4px 0;
-}
 .enaenn-slot-empty {
     background: color-mix(in srgb, var(--SmartThemeBodyColor) 1%, transparent);
     border: 1px dashed color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
     border-radius: 8px;
-    min-height: 40px;
+    min-height: 36px;
 }
 .enaenn-slot-empty::before { display: none; }
 
-/* ── Agent name ──────────────────────────────────── */
-.enaenn-agent-name {
-    font-size: 0.95em;
-    font-weight: 800;
-    letter-spacing: 0.2px;
-    line-height: 1.2;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-/* ── Agent attire ────────────────────────────────── */
-.enaenn-agent-attire {
-    font-size: 0.72em;
-    opacity: 0.55;
-    line-height: 1.3;
-    padding-bottom: 5px;
-    border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-/* ── Vitals ──────────────────────────────────────── */
-.enaenn-vitals {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-}
-
-.enaenn-vital-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.75em;
-}
-
-.enaenn-vital-emoji {
-    width: 14px;
-    text-align: center;
-    flex-shrink: 0;
-    font-size: 0.95em;
-}
-
-.enaenn-vital-bar-wrap {
-    flex: 1;
-    height: 3px;
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
-    border-radius: 2px;
-    overflow: hidden;
-    min-width: 0;
-}
-
-.enaenn-vital-fill {
-    height: 100%;
-    border-radius: 2px;
-}
-
-/* Color classes */
-.enaenn-fill-ok      { background: linear-gradient(90deg, #3d8b5c, #5cb07a); }
-.enaenn-fill-warn    { background: linear-gradient(90deg, #b07d28, #d9a040); }
-.enaenn-fill-crit    { background: linear-gradient(90deg, #8b3030, #b04848); }
-.enaenn-fill-arousal { background: linear-gradient(90deg, #7D2A40, #A94064); }
-
-.enaenn-vital-val {
-    font-size: 0.85em;
-    font-weight: 700;
-    min-width: 30px;
-    text-align: right;
-    flex-shrink: 0;
-    opacity: 0.9;
-}
-
-.enaenn-vital-delta {
-    font-size: 0.78em;
-    opacity: 0.4;
-    min-width: 34px;
-    text-align: right;
-    flex-shrink: 0;
-}
-
-/* ── Condition tag ───────────────────────────────── */
-.enaenn-condition {
-    font-size: 0.72em;
-    padding: 3px 6px;
-    background: color-mix(in srgb, #b04848 15%, transparent);
-    border: 1px solid color-mix(in srgb, #b04848 25%, transparent);
-    border-radius: 6px;
-    line-height: 1.3;
-}
-
-/* ── Active impulse ──────────────────────────────── */
-.enaenn-impulse {
-    font-size: 0.72em;
-    opacity: 0.65;
-    padding-top: 4px;
-    border-top: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
-
-/* ══════════════════════════════════════════════════
-   RELATIONSHIP MATRIX — Tab 2
-   .enaenn-agent-slot reused as card container
-   ══════════════════════════════════════════════════ */
-
+/* ── Relationship card content ───────────────────── */
 .enaenn-rel-title {
     font-size: 0.72em;
     font-weight: 800;
@@ -363,14 +367,12 @@
 
 .enaenn-rel-main {
     display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.8em;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 0.82em;
     font-weight: 600;
-    flex-wrap: wrap;
 }
 .enaenn-rel-main > span:first-child {
-    width: 100%;
     font-size: 0.95em;
     line-height: 1.2;
 }
@@ -392,24 +394,25 @@
 .enaenn-rel-val {
     font-size: 0.78em;
     font-weight: 700;
-    opacity: 0.65;
+    opacity: 0.6;
     white-space: nowrap;
     flex-shrink: 0;
+    text-align: right;
 }
 
 .enaenn-rel-moments {
     display: flex;
     flex-direction: column;
     gap: 3px;
-    margin-top: 2px;
+    margin-top: 1px;
 }
 
 .enaenn-rel-moment-row {
     display: flex;
     align-items: center;
     gap: 5px;
-    font-size: 0.75em;
-    opacity: 0.85;
+    font-size: 0.78em;
+    opacity: 0.82;
 }
 .enaenn-rel-moment-bar-wrap {
     flex: 1;
@@ -428,7 +431,7 @@
     font-size: 0.85em;
     font-weight: 700;
     opacity: 0.65;
-    min-width: 20px;
+    min-width: 18px;
     text-align: right;
     flex-shrink: 0;
 }
@@ -437,19 +440,19 @@
     font-size: 0.7em;
     opacity: 0.45;
     font-style: italic;
-    margin-top: 1px;
+    margin-top: 2px;
     line-height: 1.3;
 }
 
 /* ══════════════════════════════════════════════════
-   OFF-SCREEN AGENTS — Tab 3
+   TAB 3 — OFF-SCREEN AGENTS (text list)
    ══════════════════════════════════════════════════ */
 
 .enaenn-offscreen-row {
     display: flex;
     flex-direction: column;
     gap: 2px;
-    font-size: 0.82em;
+    font-size: 0.83em;
     padding: 6px 4px;
     border-bottom: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 7%, transparent);
 }
@@ -462,10 +465,10 @@
     line-height: 1.3;
 }
 .enaenn-offscreen-vitals {
-    opacity: 0.6;
+    opacity: 0.58;
     font-size: 0.9em;
     margin-top: 1px;
-    line-height: 1.4;
+    line-height: 1.5;
 }
 
 /* ══════════════════════════════════════════════════
