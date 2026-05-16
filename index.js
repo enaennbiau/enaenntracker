@@ -167,12 +167,24 @@ FULL HTML STRUCTURE
 VITAL ROW FORMAT (use for all 7 vitals in agent cards)
 ════════════════════════════════════
 
+Use this exact structure for all 7 vitals. LABEL names are fixed — always use the label in the list below.
+
 <div class="enaenn-vital-row">
   <span class="enaenn-vital-emoji">[EMOJI]</span>
+  <span class="enaenn-vital-label">[LABEL]</span>
   <div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill [COLOR_CLASS]" style="width:[BAR_WIDTH]%"></div></div>
   <span class="enaenn-vital-val">[VALUE]%</span>
   <span class="enaenn-vital-delta">([DELTA]%)</span>
 </div>
+
+Emoji → Label mapping (use exactly these label names):
+  🍴 → Satiation
+  😴 → Energy
+  🚿 → Cleanliness
+  💧 → Thirst
+  🚽 → Bladder
+  🔥 → Arousal
+  🧠 → Stress
 
 COLOR_CLASS rules — choose based on value AND polarity:
 

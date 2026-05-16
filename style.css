@@ -189,30 +189,40 @@
     flex: 1;
 }
 
+/* ── "No agents present" message ─────────────────── */
+.enaenn-alone-msg {
+    text-align: center;
+    padding: 18px 0;
+    font-size: 0.82em;
+    opacity: 0.35;
+    font-style: italic;
+}
+
 /* ── Foldable vitals — "Details" style ──────────── */
 .enaenn-vitals-fold {
     border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent);
-    border-radius: 6px;
+    border-radius: 8px;
     overflow: hidden;
 }
 
 .enaenn-vitals-fold > summary {
     list-style: none;
     cursor: pointer;
-    padding: 5px 10px;
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 6%, transparent);
-    font-size: 0.78em;
+    padding: 6px 10px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 5%, transparent);
+    font-size: 0.8em;
     font-weight: 700;
-    opacity: 0.7;
+    opacity: 0.65;
     user-select: none;
     display: flex;
     align-items: center;
     gap: 6px;
     transition: opacity 0.15s, background 0.15s;
+    letter-spacing: 0.2px;
 }
 .enaenn-vitals-fold > summary:hover {
     opacity: 1;
-    background: color-mix(in srgb, var(--SmartThemeBodyColor) 9%, transparent);
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 8%, transparent);
 }
 .enaenn-vitals-fold > summary::-webkit-details-marker { display: none; }
 .enaenn-vitals-fold > summary::after {
@@ -221,7 +231,7 @@
     font-weight: 900;
     margin-left: auto;
     font-size: 0.65em;
-    opacity: 0.5;
+    opacity: 0.45;
     transition: transform 0.2s;
 }
 .enaenn-vitals-fold:not([open]) > summary::after { transform: rotate(180deg); }
@@ -230,7 +240,8 @@
 }
 
 .enaenn-vitals-fold > .enaenn-vitals {
-    padding: 6px 10px;
+    padding: 6px 10px 8px;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
 }
 
 /* ── Vitals rows ─────────────────────────────────── */
@@ -245,6 +256,7 @@
     align-items: center;
     gap: 6px;
     font-size: 0.82em;
+    padding: 1px 0;
 }
 
 .enaenn-vital-emoji {
@@ -253,7 +265,14 @@
     flex-shrink: 0;
     font-size: 1em;
     filter: grayscale(1);
-    opacity: 0.65;
+    opacity: 0.5;
+}
+
+.enaenn-vital-label {
+    font-size: 0.82em;
+    opacity: 0.55;
+    min-width: 62px;
+    flex-shrink: 0;
 }
 
 .enaenn-vital-bar-wrap {
