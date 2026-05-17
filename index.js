@@ -39,30 +39,72 @@ STRICT OUTPUT RULES
 ════════════════════════════════════
 - Output starts with <div class="enaenn-tracker-block"> and ends with </div>.
 - No markdown, no code fences, no commentary before or after.
-- Choose ONE random 6-digit number (e.g. 748291) and replace EVERY instance of [UID] with that SAME number. This makes radio button names unique across tracker messages so tabs work independently.
+- The [UID] placeholder: output it LITERALLY as the text [UID] — do NOT replace it. The system will replace it automatically.
 - Never include user/{{user}} as an agent. USER IS NOT AN AGENT. Track {{char}} and NPCs only.
 - PREVIOUS STATE FORMAT CHECK: If the previous tracker state does not contain "enaenn-tabs-box" it is in an outdated format — ignore it entirely and rebuild fresh from the chat context instead.
 - If no previous tracker state exists OR it is outdated, initialize all values fresh from chat context.
 
 ════════════════════════════════════
-TAB RULES — READ CAREFULLY
+STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
+════════════════════════════════════
+Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed since the last tracker update. Write your estimate mentally (e.g. "~25 minutes passed"). Use this duration to drive ALL vital calculations below. Do NOT just subtract 1% per turn — use the actual rates below scaled to the estimated time.
+
+════════════════════════════════════
+STEP 2 — VITAL CALCULATION RULES
 ════════════════════════════════════
 
-TAB 1 — Agents Present (FLAT LIST, one row per agent):
+LOW = critical vitals (🍴😴🚿) — low values are dangerous:
+  value ≥ 50% → enaenn-fill-ok | value 25–49% → enaenn-fill-warn | value < 25% → enaenn-fill-crit
+
+HIGH = critical vitals (💧🚽🧠) — high values are dangerous:
+  value ≤ 50% → enaenn-fill-ok | value 51–74% → enaenn-fill-warn | value ≥ 75% → enaenn-fill-crit
+
+🔥 Arousal (0–200%) — always: enaenn-fill-arousal. BAR_WIDTH = min(value, 100). Show actual value in val span.
+
+RATES — scale these by your Step 1 time estimate. These are NOT "per turn" values:
+🍴  decay −0.2–0.4% per 5 min (−2.4–4.8%/hr).  Meal: +60–80%. Snack: +10–17%.
+😴  decay −0.25–0.33% per 5 min (−3–4%/hr, normal); −0.4–0.6% per 5 min (strenuous).
+    Sleep: +10–15%/hr. Never use sleep as a scene-closer.
+🚿  decay −0.05–0.15% per 5 min (×3–4 during exertion/heat).
+    Shower: +95–100%. Quick wash: +5–10%.
+💧/🚽 rise +0.3–0.7% per 5 min. Glass of water: 💧 −45–55%, 🚽 +8–12%.
+🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs.
+🔥  builds +2–8% per 5 min with stimulus. Decays ~−0.5% per 5 min without.
+
+NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
+Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠).
+
+🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show only when active.
+
+════════════════════════════════════
+STEP 3 — RELATIONSHIP RULES
+════════════════════════════════════
+
+Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs.
+In The Moment feelings (0–100, max 4 per agent): tied to current events. Dissipate when no longer relevant.
+  At 100 or 0 → transform into natural successor/predecessor.
+  Negative transformation → deduct 1–20 from Main. Positive → add 1–5 to Main.
+Relationship stage + "known for" duration: track separately per agent.
+Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
+Choose ALL feeling names as the AGENT would personally describe them.
+
+════════════════════════════════════
+STEP 4 — TAB CONTENT RULES
+════════════════════════════════════
+
+TAB 1 — Agents Present (flat list):
 - One .enaenn-agent-row per agent PHYSICALLY IN THE CURRENT SCENE (never the user).
-- No grid. Just a stacked vertical list of rows.
 - If the user is alone (no agents): output <div class="enaenn-alone-msg">No agents present.</div>
 
-TAB 2 — Relationship Matrix (3-COLUMN GRID, always populated):
-- Shows ALL tracked agents with a relationship to the user — both on-screen AND off-screen.
-- This tab is NEVER empty. Use .enaenn-agents-grid with one .enaenn-agent-slot per agent.
-- The grid wraps naturally; no need to pad with empty slots.
+TAB 2 — Relationship Matrix (foldable rows, always populated):
+- Shows ALL tracked agents — both on-screen AND off-screen. NEVER empty.
+- One <details class="enaenn-rel-fold"> per agent. Each row is independently collapsible.
+- The <summary> shows the agent name + a brief preview of their main feeling.
 
 TAB 3 — Off-screen Agents (text list):
-- One .enaenn-offscreen-row per agent NOT in the current scene who has a relationship with the user.
-- Vitals MUST be SHORT TEXT LABELS ONLY — no percentages, no numbers, no calculations.
+- One .enaenn-offscreen-row per off-screen agent with a relationship to the user.
+- Vitals: SHORT TEXT LABELS ONLY — no percentages, no numbers.
   Allowed words: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm
-- Format: 🍴(label) | 😴(label) | 🚿(label) | 🚽(label) | 💧(label) | 🔥(label) | 🧠(label) // 🎯 [impulse]
 
 ════════════════════════════════════
 FULL HTML STRUCTURE
@@ -70,7 +112,7 @@ FULL HTML STRUCTURE
 
 <div class="enaenn-tracker-block">
 
-  <div class="enaenn-location">📍 [Concise 1–2 sentence description of present agents' and user's spatial positions]</div>
+  <div class="enaenn-location">📍 [Concise 1–2 sentence spatial description]</div>
 
   <div class="enaenn-tabs-box">
     <input type="radio" name="enaenn-[UID]" id="enaenn-t1-[UID]" checked>
@@ -88,7 +130,7 @@ FULL HTML STRUCTURE
       <div class="enaenn-tp1">
 
         [If alone: <div class="enaenn-alone-msg">No agents present.</div>]
-        [Otherwise: one .enaenn-agent-row per present agent:]
+        [Otherwise: one .enaenn-agent-row per present agent, separated by .enaenn-agent-sep divs:]
 
         <div class="enaenn-agent-row">
           <div class="enaenn-agent-header">
@@ -104,31 +146,38 @@ FULL HTML STRUCTURE
           [Only if active condition: <div class="enaenn-condition">🩹 [condition and effect]</div>]
           <div class="enaenn-impulse">🎯 [agent's most active current drive]</div>
         </div>
+        <div class="enaenn-agent-sep"></div>
+        [repeat for each additional agent; omit the last .enaenn-agent-sep]
 
       </div>
 
       <div class="enaenn-tp2">
-        <div class="enaenn-agents-grid">
+        <div class="enaenn-rel-list">
 
-          [One .enaenn-agent-slot per ALL tracked agents with a relationship to user. Grid wraps automatically — no empty slots needed.]
+          [One <details class="enaenn-rel-fold"> per ALL tracked agents. NEVER leave this empty.]
 
-          <div class="enaenn-agent-slot">
-            <div class="enaenn-rel-title">[Name] → [User]</div>
-            <div class="enaenn-rel-main">
-              <span>[Emoji] [Main feeling name as the AGENT would describe it]</span>
-              <div class="enaenn-rel-bar-wrap"><div class="enaenn-rel-fill" style="width:[value÷10]%"></div></div>
-              <span class="enaenn-rel-val">([value]/1000)</span>
-            </div>
-            <div class="enaenn-rel-moments">
-              <div class="enaenn-rel-moment-row">
-                <span>[Emoji] [Feeling name]</span>
-                <div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:[value]%"></div></div>
-                <span class="enaenn-rel-moment-val">[value]</span>
+          <details class="enaenn-rel-fold">
+            <summary>
+              <span class="enaenn-rel-fold-name">[Name] → [User]</span>
+              <span class="enaenn-rel-fold-preview">[Emoji] [Main feeling name] ([value]/1000)</span>
+            </summary>
+            <div class="enaenn-rel-fold-body">
+              <div class="enaenn-rel-main">
+                <span>[Emoji] [Main feeling name as the AGENT would describe it]</span>
+                <div class="enaenn-rel-bar-wrap"><div class="enaenn-rel-fill" style="width:[value÷10]%"></div></div>
+                <span class="enaenn-rel-val">([value]/1000)</span>
               </div>
-              [up to 3 more moment rows]
+              <div class="enaenn-rel-moments">
+                <div class="enaenn-rel-moment-row">
+                  <span>[Emoji] [Feeling name]</span>
+                  <div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:[value]%"></div></div>
+                  <span class="enaenn-rel-moment-val">[value]</span>
+                </div>
+                [up to 3 more moment rows]
+              </div>
+              <div class="enaenn-rel-stage">Known [duration] · [Relationship stage]</div>
             </div>
-            <div class="enaenn-rel-stage">Known [duration] · [Relationship stage]</div>
-          </div>
+          </details>
 
           [repeat for each tracked agent]
 
@@ -137,7 +186,7 @@ FULL HTML STRUCTURE
 
       <div class="enaenn-tp3">
 
-        [One .enaenn-offscreen-row per off-screen agent with a relationship to the user. Text-label vitals ONLY. If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
+        [One .enaenn-offscreen-row per off-screen agent. Text labels only. If none: <div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>]
 
         <div class="enaenn-offscreen-row">
           <div class="enaenn-offscreen-name">[♀️/♂️] [Name] — 📍[Location] // [What they are doing]</div>
@@ -149,14 +198,13 @@ FULL HTML STRUCTURE
     </div>
   </div>
 
-  [Only if there are upcoming plans — omit the entire details block otherwise:]
+  [Only if upcoming plans exist:]
   <details class="enaenn-plans">
     <summary>📅 Future Plans</summary>
     <div class="enaenn-plans-body">
-      [One row per plan, chronological:]
       <div class="enaenn-plan-row">
         <span class="enaenn-plan-date">[day, month]</span>
-        <span class="enaenn-plan-desc">[Concise description]</span>
+        <span class="enaenn-plan-desc">[description]</span>
       </div>
     </div>
   </details>
@@ -164,10 +212,8 @@ FULL HTML STRUCTURE
 </div>
 
 ════════════════════════════════════
-VITAL ROW FORMAT (use for all 7 vitals in agent cards)
+VITAL ROW FORMAT
 ════════════════════════════════════
-
-Use this exact structure for all 7 vitals. LABEL names are fixed — always use the label in the list below.
 
 <div class="enaenn-vital-row">
   <span class="enaenn-vital-emoji">[EMOJI]</span>
@@ -177,75 +223,8 @@ Use this exact structure for all 7 vitals. LABEL names are fixed — always use 
   <span class="enaenn-vital-delta">([DELTA]%)</span>
 </div>
 
-Emoji → Label mapping (use exactly these label names):
-  🍴 → Satiation
-  😴 → Energy
-  🚿 → Cleanliness
-  💧 → Thirst
-  🚽 → Bladder
-  🔥 → Arousal
-  🧠 → Stress
-
-COLOR_CLASS rules — choose based on value AND polarity:
-
-LOW = critical vitals (🍴😴🚿) — low values are dangerous:
-  value ≥ 50% → enaenn-fill-ok
-  value 25–49% → enaenn-fill-warn
-  value < 25% → enaenn-fill-crit
-
-HIGH = critical vitals (💧🚽🧠) — high values are dangerous:
-  value ≤ 50% → enaenn-fill-ok
-  value 51–74% → enaenn-fill-warn
-  value ≥ 75% → enaenn-fill-crit
-
-🔥 Arousal (0–200%) — always: enaenn-fill-arousal
-  BAR_WIDTH = min(value, 100) — bar caps at 100% visually even when value exceeds it
-  Show actual value in .enaenn-vital-val (e.g. "142%")
-
-DELTA format: show change from previous snapshot e.g. "(−2.4%)" or "(+15%)". Use "—" for first snapshot.
-
-════════════════════════════════════
-VITAL TRACKING GUIDELINES
-════════════════════════════════════
-
-Track all vitals separately for each on-screen agent. Never track the user.
-LOW = critical: 🍴 food satiation | 😴 energy | 🚿 cleanliness
-HIGH = critical: 💧 thirst | 🔥 arousal | 🚽 bladder | 🧠 stress
-Do NOT confuse these polarities.
-Calculate decay/rise based on elapsed in-scene time.
-
-VITAL RATES (per 5 min / per hour):
-🍴  decay −0.2–0.4% / −2.4–4.8%.  Meal: +60–80%. Snack: +10–17%.
-😴  decay −0.25–0.33% / −3–4% (normal); −0.4–0.6% / −5–7% (strenuous).
-    Sleep restores +10–15%/hr. At 100% → wake (unless <6 hr slept at night). Never use sleep as a scene-closer.
-🚿  decay −0.05–0.15% / −0.6–1.8% (×3–4 during exertion/heat/dirt).
-    Shower: +95–100%. Quick wash: +5–10%. Clean clothes: +3–5%.
-💧/🚽 rise +0.3–0.7% / +4–8%. Glass of water: 💧 −45–55%, 🚽 +8–12%. Bottle: 💧 −100%, 🚽 +20–25%.
-🧠  decay −0.3–0.5% / −3.6–6% during restful/positive/sleep. Rises from unmet needs, friction, danger. If 🧠 > 75% → agent seeks stress relief.
-🔥  build +2–8%/5min. Decay (no stimulus) ~−0.5%/5min. Values >100% = sexual activity only. 200% = climax.
-
-NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
-If any of 🍴, 😴, 🚿 drops below 25% or any of 💧, 🚽 rises above 75%, the agent must prioritize resolving that need.
-Unmet needs affect behavior: low 😴 → irritability; high 🔥 → distraction; high 🧠 → stress-seeking behavior; etc.
-Multiple vitals can shift at once from one event (e.g. sex drops 🚿 and 🍴, drops 🔥, raises 🚽 and 💧).
-
-🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show only when active. Conditions must realistically affect vitals and behavior.
-
-════════════════════════════════════
-RELATIONSHIP MATRIX RULES
-════════════════════════════════════
-
-Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs. Naturally evolves at 0 or 1000 into successor/predecessor. Deductions allowed during negative events. Never rush Main's development.
-
-In The Moment feelings (0–100, max 4): tied to current events.
-  At 100 or 0 → transform into natural successor/predecessor.
-  Negative feeling transformation → deduct 1–20 from Main. Positive → add 1–5 to Main.
-  Dissipate feelings no longer reflecting current events.
-
-Relationship stage + "known for" duration: track separately per agent.
-Off-screen agents in Tab 3: show only text vitals summary, no relationship cards (those are Tab 2 for on-screen only).
-Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
-Choose ALL feeling names as the AGENT would personally describe them.`;
+Emoji → Label: 🍴 Satiation | 😴 Energy | 🚿 Cleanliness | 💧 Thirst | 🚽 Bladder | 🔥 Arousal | 🧠 Stress
+DELTA: change from previous snapshot, e.g. "(−2.4%)" or "(+15%)". Use "—" for first snapshot.`;
 
 // ─── SETTINGS ─────────────────────────────────────────────────────────────────
 
@@ -440,6 +419,9 @@ async function insertTrackerMessage(content) {
     if (_addOneMessage) {
         try {
             await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
+            // ST may async-reprocess the message after addOneMessage returns,
+            // escaping our HTML back to raw text. Wait a tick then re-inject.
+            await new Promise(r => setTimeout(r, 350));
             $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(wrapped);
             const $chat = $('#chat');
             $chat.scrollTop($chat[0].scrollHeight);
@@ -477,12 +459,26 @@ async function updateTracker() {
     _updating = true;
     setLoadingState(true);
 
-    const result = await callTrackerAPI();
+    let result = await callTrackerAPI();
 
     setLoadingState(false);
     _updating = false;
 
     if (!result) return;
+
+    // ── Guarantee unique radio-button names ──────────────────────────────────
+    // The model outputs "[UID]" literally (per prompt instruction). Replace it
+    // with a real unique token so tabs in different tracker messages never share
+    // a name= attribute and interfere with each other.
+    const realUid = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    result = result.split('[UID]').join(realUid);
+
+    // Also fix the case where the model still tried to pick its own number.
+    // Find whatever UID it used in name="enaenn-X" and normalise to realUid.
+    const usedUid = result.match(/name="enaenn-([^"]+)"/)?.[1];
+    if (usedUid && usedUid !== realUid) {
+        result = result.split(usedUid).join(realUid);
+    }
 
     const wrapped = result.includes('enaenn-tracker-block')
         ? result
