@@ -43,7 +43,6 @@ STRICT OUTPUT RULES
 - Never include user/{{user}} as an agent. USER IS NOT AN AGENT. Track {{char}} and NPCs only.
 - PREVIOUS STATE FORMAT CHECK: If the previous tracker state does not contain "enaenn-tabs-box" it is in an outdated format — ignore it entirely and rebuild fresh from the chat context instead.
 - If no previous tracker state exists OR it is outdated, initialize all values fresh from chat context.
-- Remember to keep relationship matrix values the same when an agent doesn't interact with user.
 
 ════════════════════════════════════
 STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
@@ -81,13 +80,33 @@ Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽�
 STEP 3 — RELATIONSHIP RULES
 ════════════════════════════════════
 
-Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs.
-In The Moment feelings (0–100, max 4 per agent): tied to current events. Dissipate when no longer relevant.
-  At 100 or 0 → transform into natural successor/predecessor.
-  Negative feeling transformation → deduct 1–20 from Main. Positive feeling → add 1–5 to Main.
-Relationship stage + "known for" duration: track separately per agent.
+Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
+
+► ON-SCREEN AGENTS (physically in the current scene):
+  Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs.
+    VALENCE: the feeling NAME determines whether it is positive or negative — the scale is always 0–1000.
+    Positive Main (e.g. affection, admiration): use class enaenn-rel-fill (purple bar) as before.
+    Negative Main (e.g. contempt, resentment, hatred): use class enaenn-rel-fill-neg (red bar).
+    At 1000 → transforms into a STRONGER version of the same valence (positive → deeper positive; negative → deeper negative).
+    At 0 → transforms into a WEAKER / more neutral version moving toward the opposite valence (positive fades toward indifference; negative softens toward neutrality or slight positive).
+  In The Moment feelings (0–100, max 4 per agent): reflect what is happening right now in the scene.
+    Dissipate ONLY when the specific event or mood that caused them has clearly ended within the scene.
+    At 100 → intensifies into a stronger successor of the same valence.
+    At 0 → dissolves into a milder predecessor or fades entirely.
+    Negative ITM transformation → deduct 1–20 from Main. Positive ITM transformation → add 1–5 to Main.
+  Relationship stage + "known for" duration: update only when warranted by scene events.
+
+► OFF-SCREEN AGENTS (not physically in the current scene):
+  HARD FREEZE — copy every value (Main AND all In The Moment feelings AND stage AND duration) EXACTLY
+  from the previous tracker state. Do not change any numbers. Do not apply decay. Do not apply
+  dissipation. Do not apply transformation. Do not let In The Moment feelings "fade out naturally."
+  The ONLY exception: if the current roleplay messages contain an explicit event directly involving
+  the off-screen agent (a letter arrives, a phone call, someone delivers specific news about them) —
+  apply only the single targeted change that event warrants, and nothing else.
+  Time passing alone is NEVER a reason to change an off-screen agent's relationship values.
+
 Choose ALL feeling names as the AGENT would personally describe them.
-Track feelings and relationship, taking in agent’s personality. E.g., if an avoidant agent has spent more than 48 hours in sustained proximity/availability, 🧠 stress rises by +10-15 per day. 
+Track personality-consistent behavior: e.g. an avoidant agent in sustained proximity → 🧠 +10–15/day.
 
 ════════════════════════════════════
 STEP 4 — TAB CONTENT RULES
@@ -101,7 +120,7 @@ TAB 2 — Relationships (foldable rows, always populated):
 - Shows ALL tracked agents — both on-screen AND off-screen. NEVER empty.
 - One <details class="enaenn-rel-fold"> per agent. Each row is independently collapsible.
 - The <summary> shows the agent name + a brief preview of their main feeling.
-- If the agent is currently off-screen, freeze their last feeling values until they interact with user again.
+- Off-screen agents: copy their values verbatim from the previous state (see STEP 3 freeze rule).
 
 TAB 3 — Off-screen Agents (text list):
 - One .enaenn-offscreen-row per off-screen agent with a relationship to the user.
@@ -166,7 +185,7 @@ FULL HTML STRUCTURE
             <div class="enaenn-rel-fold-body">
               <div class="enaenn-rel-main">
                 <span>[Emoji] [Main feeling name as the AGENT would describe it]</span>
-                <div class="enaenn-rel-bar-wrap"><div class="enaenn-rel-fill" style="width:[value÷10]%"></div></div>
+                <div class="enaenn-rel-bar-wrap"><div class="[enaenn-rel-fill if positive feeling | enaenn-rel-fill-neg if negative feeling]" style="width:[value÷10]%"></div></div>
                 <span class="enaenn-rel-val">([value]/1000)</span>
               </div>
               <div class="enaenn-rel-moments">
