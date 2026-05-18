@@ -64,12 +64,12 @@ HIGH = critical vitals (💧🚽🧠) — high values are dangerous:
 RATES — scale these by your Step 1 time estimate. These are NOT "per turn" values:
 🍴  decay −0.2–0.4% per 5 min (−2.4–4.8%/hr).  Meal: +60–80%. Snack: +10–17%.
 😴  decay −0.25–0.33% per 5 min (−3–4%/hr, normal); −0.4–0.6% per 5 min (strenuous).
-    Sleep: +10–15%/hr. Never use sleep as a scene-closer.
+    Sleep: +10–15%/hr. 
 🚿  decay −0.05–0.15% per 5 min (×3–4 during exertion/heat).
     Shower: +95–100%. Quick wash: +5–10%.
 💧/🚽 rise +0.3–0.7% per 5 min. Glass of water: 💧 −45–55%, 🚽 +8–12%.
 🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs.
-🔥  builds +2–8% per 5 min with stimulus. Decays ~−0.5% per 5 min without.
+🔥  builds +2–8% per 5 min with stimulus. Decays ~−0.5% per 5 min without. Values past 100% reserved for sexual activity. 200% = climax.
 
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
 Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠).
@@ -100,7 +100,7 @@ TAB 2 — Relationship Matrix (foldable rows, always populated):
 - Shows ALL tracked agents — both on-screen AND off-screen. NEVER empty.
 - One <details class="enaenn-rel-fold"> per agent. Each row is independently collapsible.
 - The <summary> shows the agent name + a brief preview of their main feeling.
-- If the agent is off-screen, freeze their last Relationship Matrix state until their next interaction with user.
+- If the agent is off-screen, freeze their last known Relationship Matrix values until they interact with user again.
 
 TAB 3 — Off-screen Agents (text list):
 - One .enaenn-offscreen-row per off-screen agent with a relationship to the user.
