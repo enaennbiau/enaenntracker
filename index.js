@@ -87,7 +87,7 @@ In The Moment feelings (0–100, max 4 per agent): tied to current events. Dissi
   Negative feeling transformation → deduct 1–20 from Main. Positive feeling → add 1–5 to Main.
 Relationship stage + "known for" duration: track separately per agent.
 Choose ALL feeling names as the AGENT would personally describe them.
-Build the relationship matrix, taking in agent’s personality. E.g., if an avoidant agent has spent more than 48 hours in sustained proximity/availability, 🧠 stress rises by +10-15 per day. 
+Track feelings and relationship, taking in agent’s personality. E.g., if an avoidant agent has spent more than 48 hours in sustained proximity/availability, 🧠 stress rises by +10-15 per day. 
 
 ════════════════════════════════════
 STEP 4 — TAB CONTENT RULES
@@ -97,11 +97,11 @@ TAB 1 — Agents Present (flat list):
 - One .enaenn-agent-row per agent PHYSICALLY IN THE CURRENT SCENE (never the user).
 - If the user is alone (no agents): output <div class="enaenn-alone-msg">No agents present.</div>
 
-TAB 2 — Relationship Matrix (foldable rows, always populated):
+TAB 2 — Relationships (foldable rows, always populated):
 - Shows ALL tracked agents — both on-screen AND off-screen. NEVER empty.
 - One <details class="enaenn-rel-fold"> per agent. Each row is independently collapsible.
 - The <summary> shows the agent name + a brief preview of their main feeling.
-- If the agent is off-screen, freeze their last known Relationship Matrix values until they interact with user again.
+- If the agent is currently off-screen, freeze their last feeling values until they interact with user again.
 
 TAB 3 — Off-screen Agents (text list):
 - One .enaenn-offscreen-row per off-screen agent with a relationship to the user.
@@ -114,7 +114,7 @@ FULL HTML STRUCTURE
 
 <div class="enaenn-tracker-block">
 
-  <div class="enaenn-location">📍 [Concise 1–2 sentence spatial description]</div>
+  <div class="enaenn-location">📍 [Concise 1-sentence spatial description of on-screen agents and user]</div>
 
   <div class="enaenn-tabs-box">
     <input type="radio" name="enaenn-[UID]" id="enaenn-t1-[UID]" checked>
@@ -123,7 +123,7 @@ FULL HTML STRUCTURE
 
     <div class="enaenn-tab-labels">
       <label for="enaenn-t1-[UID]">💖 Agents Present</label>
-      <label for="enaenn-t2-[UID]">💕 Relationship Matrix</label>
+      <label for="enaenn-t2-[UID]">💕 Relationships</label>
       <label for="enaenn-t3-[UID]">🌍 Off-screen Agents</label>
     </div>
 
