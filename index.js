@@ -83,8 +83,9 @@ STEP 3 — RELATIONSHIP RULES
 Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs.
 In The Moment feelings (0–100, max 4 per agent): tied to current events. Dissipate when no longer relevant.
   At 100 or 0 → transform into natural successor/predecessor.
-  Negative transformation → deduct 1–20 from Main. Positive → add 1–5 to Main.
+  Negative feeling transformation → deduct 1–20 from Main. Positive feeling → add 1–5 to Main.
 Relationship stage + "known for" duration: track separately per agent.
+If the agent is off-screen, freeze their Relationship Matrix until they somehow interact with user again.
 Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
 Choose ALL feeling names as the AGENT would personally describe them.
 
