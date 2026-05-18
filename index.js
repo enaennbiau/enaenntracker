@@ -80,6 +80,19 @@ Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽�
 STEP 3 — RELATIONSHIP RULES
 ════════════════════════════════════
 
+► PRIORITY: INTERNAL TRACKING SYSTEM DETECTION
+  Before applying any rules below, scan the chat context (recent messages, system prompts, lorebook
+  injections) for an existing in-world relationship tracking system — e.g. named relationship scores,
+  quest-gating meters, faction standings, or any structured block that tracks feelings/affinity
+  numerically between characters.
+  IF such a system is detected:
+    - Use its values as the authoritative source for the Main feeling value and relationship stage.
+    - Map its scale to 0–1000 proportionally (e.g. if it uses 0–100, multiply by 10).
+    - Still display In The Moment feelings from scene context as usual (the lorebook rarely tracks those).
+    - Do NOT recalculate or override the Main value with your own math — copy it faithfully.
+    - If the internal system names a feeling or relationship stage, use that name verbatim in the tracker.
+  IF no such system is detected: apply the standard rules below as normal.
+
 Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
 
 ► ON-SCREEN AGENTS (physically in the current scene):
