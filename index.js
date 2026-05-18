@@ -85,7 +85,6 @@ In The Moment feelings (0–100, max 4 per agent): tied to current events. Dissi
   At 100 or 0 → transform into natural successor/predecessor.
   Negative feeling transformation → deduct 1–20 from Main. Positive feeling → add 1–5 to Main.
 Relationship stage + "known for" duration: track separately per agent.
-If the agent is off-screen, freeze their Relationship Matrix until they somehow interact with user again.
 Avoidant agents: 🧠 +10–15/day after 48 hr sustained proximity.
 Choose ALL feeling names as the AGENT would personally describe them.
 
@@ -101,6 +100,7 @@ TAB 2 — Relationship Matrix (foldable rows, always populated):
 - Shows ALL tracked agents — both on-screen AND off-screen. NEVER empty.
 - One <details class="enaenn-rel-fold"> per agent. Each row is independently collapsible.
 - The <summary> shows the agent name + a brief preview of their main feeling.
+- If the agent is off-screen, freeze their last Relationship Matrix state until their next interaction with user.
 
 TAB 3 — Off-screen Agents (text list):
 - One .enaenn-offscreen-row per off-screen agent with a relationship to the user.
