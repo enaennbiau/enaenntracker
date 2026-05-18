@@ -448,6 +448,42 @@ async function insertTrackerMessage(content) {
     $chat.scrollTop($chat[0].scrollHeight);
 }
 
+// ─── DELETE LAST TRACKER ──────────────────────────────────────────────────────
+
+async function deleteLastTracker() {
+    const indices = getTrackerIndices();
+    if (indices.length === 0) {
+        toastr.info('No tracker to delete.');
+        return false;
+    }
+
+    const lastIdx = indices[indices.length - 1];
+
+    // Remove from DOM
+    $(`#chat .mes[mesid="${lastIdx}"]`).remove();
+
+    // Remove from chat array (splice and re-index remaining DOM elements)
+    chat.splice(lastIdx, 1);
+
+    // Re-index all subsequent DOM messages so mesid attributes stay in sync
+    $('#chat .mes').each(function () {
+        const id = parseInt($(this).attr('mesid'));
+        if (id > lastIdx) $(this).attr('mesid', id - 1);
+    });
+
+    // Roll lastTracker back to the previous tracker's content (if any)
+    const remaining = getTrackerIndices();
+    if (remaining.length > 0) {
+        const prevIdx = remaining[remaining.length - 1];
+        const prevMsg = chat[prevIdx];
+        save({ lastTracker: prevMsg?.extra?.fullContent || prevMsg?.mes || '' });
+    } else {
+        save({ lastTracker: '' });
+    }
+
+    return true;
+}
+
 // ─── MAIN UPDATE FLOW ─────────────────────────────────────────────────────────
 
 let _updating = false;
@@ -497,6 +533,9 @@ function setLoadingState(loading) {
     $('#enaennTracker_refreshBtn')
         .prop('disabled', loading)
         .text(loading ? '⏳ Updating…' : '🔄 Refresh Tracker');
+    $('#enaennTracker_regenBtn')
+        .prop('disabled', loading)
+        .text(loading ? '⏳ Updating…' : '♻️ Regenerate');
     $('#enaennTracker_toolbarBtn')
         .prop('disabled', loading)
         .text(loading ? '⏳' : '🔄');
@@ -585,8 +624,9 @@ const SETTINGS_HTML = `
       <hr />
 
       <div class="flex-container flexGap5">
-        <button id="enaennTracker_refreshBtn" class="menu_button flex1">🔄 Refresh Tracker</button>
-        <button id="enaennTracker_clearBtn"   class="menu_button" title="Clears saved tracker state. Next refresh starts fresh.">🗑️ Clear State</button>
+        <button id="enaennTracker_refreshBtn"    class="menu_button flex1">🔄 Refresh Tracker</button>
+        <button id="enaennTracker_regenBtn"      class="menu_button flex1" title="Delete the last tracker and generate a fresh one.">♻️ Regenerate</button>
+        <button id="enaennTracker_clearBtn"      class="menu_button" title="Clears saved tracker state. Next refresh starts fresh.">🗑️ Clear State</button>
       </div>
 
     </div>
@@ -641,6 +681,10 @@ function bindUI() {
     });
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
+    $('#enaennTracker_regenBtn').on('click', async () => {
+        const deleted = await deleteLastTracker();
+        if (deleted) await updateTracker();
+    });
     $('#enaennTracker_clearBtn').on('click', () => {
         save({ lastTracker: '' });
         toastr.info('Tracker state cleared. Next refresh will start fresh.');
