@@ -47,7 +47,7 @@ STRICT OUTPUT RULES
 ════════════════════════════════════
 STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
 ════════════════════════════════════
-Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed since the last tracker update. Write your estimate mentally (e.g. "~25 minutes passed"). Use this duration to drive ALL vital calculations below. Do NOT just subtract 1% per turn — use the actual rates below scaled to the estimated time.
+Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last scenes. Write your estimate mentally (e.g. "~25 minutes passed"). Use this duration to drive ALL vital calculations below. IMPORTANT: Do NOT just subtract 1% per turn — use the actual rates below scaled to the elapsed time.
 
 ════════════════════════════════════
 STEP 2 — VITAL CALCULATION RULES
