@@ -80,43 +80,43 @@ Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽�
 STEP 3 — RELATIONSHIP RULES
 ════════════════════════════════════
 
-► PRIORITY: INTERNAL TRACKING SYSTEM DETECTION
-  Before applying any rules below, scan the chat context (recent messages, system prompts, lorebook
-  injections) for an existing in-world relationship tracking system — e.g. named relationship scores,
+► IMPORTANT: INTERNAL TRACKING SYSTEM DETECTION
+  Before applying any rules below, scan the chat for an existing in-world relationship tracking system — e.g. named relationship scores,
   quest-gating meters, faction standings, or any structured block that tracks feelings/affinity
   numerically between characters.
-  IF such a system is detected:
-    - Use its values as the authoritative source for the Main feeling value and relationship stage.
-    - Map its scale to 0–1000 proportionally (e.g. if it uses 0–100, multiply by 10).
-    - Still display In The Moment feelings from scene context as usual (the lorebook rarely tracks those).
-    - Do NOT recalculate or override the Main value with your own math — copy it faithfully.
+  IF the system is detected:
+    - Use it as the authoritative source for the Main feeling value and relationship stage.
+    - Map its scale to 0–1000 proportionally (e.g. if it uses 0–100 scale, multiply by 10 to
+    make it 1000).
+    - Display In The Moment feelings from scene context as usual.
+    - Do NOT override the Main value with your own math — copy it faithfully amd multiply to match 1000-scale.
     - If the internal system names a feeling or relationship stage, use that name verbatim in the tracker.
   IF no such system is detected: apply the standard rules below as normal.
 
 Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
 
 ► ON-SCREEN AGENTS (physically in the current scene):
-  Main feeling (0–1000): develops slowly. Max +10 pts/in-game day unless a major positive event occurs.
+  Main feeling (0–1000): develops slowly. Max +20 pts/in-game day unless a major positive event occurs. Track the amount by adding "limit for [DD, MM]: value/20" after the Main feeling value.
     VALENCE: the feeling NAME determines whether it is positive or negative — the scale is always 0–1000.
     Positive Main (e.g. affection, admiration): use class enaenn-rel-fill (purple bar) as before.
     Negative Main (e.g. contempt, resentment, hatred): use class enaenn-rel-fill-neg (red bar).
     At 1000 → transforms into a STRONGER version of the same valence (positive → deeper positive; negative → deeper negative).
     At 0 → transforms into a WEAKER / more neutral version moving toward the opposite valence (positive fades toward indifference; negative softens toward neutrality or slight positive).
-  In The Moment feelings (0–100, max 4 per agent): reflect what is happening right now in the scene.
+  In The Moment feelings (0–100, max 4 feelings per agent): reflect what is happening right now in the scene.
     Dissipate ONLY when the specific event or mood that caused them has clearly ended within the scene.
     At 100 → intensifies into a stronger successor of the same valence.
     At 0 → dissolves into a milder predecessor or fades entirely.
-    Negative ITM transformation → deduct 1–20 from Main. Positive ITM transformation → add 1–5 to Main.
+    Negative ITM transformation → deduct 1–20 from Main. Positive ITM transformation → add 1–20 to Main even if bypassing the daily limit. 
   Relationship stage + "known for" duration: update only when warranted by scene events.
 
 ► OFF-SCREEN AGENTS (not physically in the current scene):
-  HARD FREEZE — copy every value (Main AND all In The Moment feelings AND stage AND duration) EXACTLY
+  HARD FREEZE — copy every value (Main AND all In The Moment feelings) EXACTLY
   from the previous tracker state. Do not change any numbers. Do not apply decay. Do not apply
   dissipation. Do not apply transformation. Do not let In The Moment feelings "fade out naturally."
   The ONLY exception: if the current roleplay messages contain an explicit event directly involving
   the off-screen agent (a letter arrives, a phone call, someone delivers specific news about them) —
   apply only the single targeted change that event warrants, and nothing else.
-  Time passing alone is NEVER a reason to change an off-screen agent's relationship values.
+  Time passing alone is NEVER a reason to change an off-screen agent's relationship.
 
 Choose ALL feeling names as the AGENT would personally describe them.
 Track personality-consistent behavior: e.g. an avoidant agent in sustained proximity → 🧠 +10–15/day.
