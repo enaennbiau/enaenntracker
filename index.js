@@ -42,25 +42,27 @@ If the previous tracker state does not start with "LOC:" it is outdated — igno
 ════════════════════════════════════
 STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
 ════════════════════════════════════
-Before calculating any numbers, estimate how much in-game time has passed since the last update based on the roleplay content. Use this to scale all vital changes. Do NOT apply a flat 1% per update — use the actual rates below scaled to elapsed time.
+Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last scenes. Write your estimate mentally (e.g. "~25 minutes passed"). Use this duration to drive ALL vital calculations below. IMPORTANT: STRICTLY AVOID simply subtracting 1% per turn — use the actual rates below to calculate vitals accordingly to the elapsed time.
 
 ════════════════════════════════════
 STEP 2 — VITAL RATES
 ════════════════════════════════════
+IMPORTANT: Never include user/{{user}} as an agent. USER IS NOT AN AGENT. Track {{char}} and relevant NPCs vitals only.
+
 LOW-polarity (safe high, dangerous low): Satiation | Energy | Cleanliness
 HIGH-polarity (safe low, dangerous high): Thirst | Bladder | Stress
-Arousal: 0–200. Values >100 only during sexual activity. 200 = climax.
+Arousal is an exception, value 0–200%. Values past 100% reserved for sexual activity, where 200% = climax.
 
 Rates per 5 min / per hour:
 Satiation: −0.2–0.4% / −2.4–4.8%. Meal: +60–80%. Snack: +10–17%.
 Energy: −0.25–0.33% / −3–4% normal; −0.4–0.6% / −5–7% strenuous. Sleep: +10–15%/hr.
 Cleanliness: −0.05–0.15% / −0.6–1.8% (×3–4 exertion/heat). Shower: +95–100%. Quick wash: +5–10%. Clean clothes: +3–5%. Swimming: varies by water source.
-Thirst/Bladder: rise +0.3–0.7% / +4–8%. Caffeine/alcohol/heat/exercise accelerate Thirst. Glass: Thirst −45–55%, Bladder +8–12%. Meal w/ drinks: Thirst −30–45%. One sip: Thirst −10–15%. Bottle: Thirst −100%, Bladder +20–25%.
-Stress: −0.3–0.5% / −3.6–6% during restful/positive events. Rises from friction, danger, unmet needs, active conditions. High stress accelerates Energy decay.
-Arousal: +2–8%/5min with sexual stimulus. −0.5%/5min without. Modified by psychology, comfort, sensitivity.
+Thirst/Bladder: rise +0.3–0.7% / +4–8%. Caffeine/alcohol/heat/exercise accelerate Thirst. Glass: Thirst −45–55%, Bladder +8–12%. Meal w/ drinks: Thirst −30–45%, bladder +10-12%. One sip: Thirst −10–15%, bladder +3%. Bottle: Thirst −100%, Bladder +20–25%.
+Stress: −0.3–0.5% / −3.6–6% during restful/positive events. Rises from friction, danger, unmet needs, active conditions. High stress accelerates Energy decay and affects ALL ITM feelings. Agent coping mechanisms may modify rate. 
+Arousal: +2–8%/5min with sexual stimulus. −0.5%/5min without. Modified by psychological engagement, comfort, sensitivity. 
 
 NEED PRIORITY when critical: Bladder > Thirst > Satiation > Energy > Cleanliness.
-Multiple vitals shift at once (sex: drops Cleanliness/Satiation/Arousal, raises Bladder/Thirst; exertion: drops Energy/Cleanliness, raises Bladder/Thirst/Stress).
+Multiple vitals can shift at once (e.g. sex: drops Cleanliness/Satiation/Arousal, raises Bladder/Thirst; exertion: drops Energy/Cleanliness, raises Bladder/Thirst/Stress).
 
 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Include only when active.
 
@@ -68,23 +70,35 @@ CONDITION: Track injuries, intoxication, illness, pain, medication, temperature 
 STEP 3 — RELATIONSHIP RULES
 ════════════════════════════════════
 
-PRIORITY — INTERNAL TRACKING SYSTEM DETECTION:
-Scan chat context for any existing in-world relationship tracking system (named scores, quest meters, faction standings).
-If detected: use its values as the authoritative Main value (map proportionally to 0–1000). Copy its feeling/stage names verbatim. Do not override with your own math.
-If not detected: apply the rules below.
+► IMPORTANT: INTERNAL TRACKING SYSTEM DETECTION
+  Before applying any rules below, scan the chat for an existing in-world relationship tracking system — e.g. named relationship scores or any structured block that already tracks feelings or/and affinity numerically between characters.
+  IF the system is detected:
+    - Use it as the authoritative source for the Main feeling value and relationship stage.
+    - Map its scale to 0–1000 proportionally (e.g. if it uses 0–100 scale, multiply by 10 to make it 1000).
+    - Display In The Moment feelings from scene context as usual.
+    - Do NOT override the Main value with your own math — copy it faithfully amd multiply to match 1000-scale.
+    - If the internal system names a feeling or relationship stage, use that name verbatim in the tracker.
+  IF no such system is detected: apply the standard rules below as normal.
+
+Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
 
 ON-SCREEN AGENTS (physically in the current scene):
-Main (0–1000): max +10 pts/in-game day unless major event. VALENCE = feeling name (positive or negative).
+Main feeling (0–1000): develops slowly. Max +20 pts/in-game day unless a major positive event occurs. Track the amount by adding "daily limit for [DD/MM]: value/20" after the Main feeling value.
 Positive Main → use "+" in valence field. Negative Main → use "-".
-At 1000 → transforms into stronger same-valence feeling. At 0 → weaker/opposite predecessor.
-ITM feelings (0–100, max 4): dissipate ONLY when the causing event clearly ends in scene.
-At 100 → stronger successor same valence. At 0 → weaker/opposite predecessor.
-Negative ITM transformation → deduct 1–20 from Main. Positive → add 1–5.
+    At 1000 → transforms into a STRONGER version of the same valence (positive → deeper positive; negative → deeper negative).
+    At 0 → transforms into a WEAKER / more neutral version moving toward the opposite valence (positive fades toward indifference; negative softens toward neutrality or slight positive).
+In The Moment (ITM) feelings (0–100, max 4 feelings per agent): reflect what an agent feels toward user right now in the scene.
+Dissipate ONLY when the specific event or mood that caused them has clearly ended within the scene.
+At 100 → intensifies into a stronger successor of the same valence.
+    At 0 → dissolves into a milder predecessor or fades entirely.
+    Negative ITM transformation → deduct 1–20 from Main. Positive ITM transformation → add 1–20 to Main even if bypassing the daily limit. 
+Relationship stage: update only when warranted by scene events. 
+"Known for" duration: track accordingly to in-game time. Mark the first day of meeting as [starting DD/MM/YY] accordingly to the narration to make tracking easier for yourself. 
 
 OFF-SCREEN AGENTS (not physically in current scene):
 HARD FREEZE — copy every REL line from the previous tracker state VERBATIM. Do not change any numbers.
 Only exception: explicit in-scene event directly involving them (letter, phone call, news delivered).
-Time passing alone is NEVER a reason to change off-screen relationship values.
+Time passing alone is NEVER a reason to change off-screen relationship values unless the agent and user didn't interact at all for a few months/years - in that case only leave the Main feeling intact, and regenerate ITM ones to fit the meeting scene. 
 
 Choose ALL feeling names as the AGENT would personally describe them.
 Track personality-consistent behavior (e.g. avoidant agent in sustained proximity → Stress +10–15/day).
