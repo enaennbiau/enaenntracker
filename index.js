@@ -70,18 +70,17 @@ CONDITION: Track injuries, intoxication, illness, pain, medication, temperature 
 STEP 3 — RELATIONSHIP RULES
 ════════════════════════════════════
 
-► IMPORTANT: INTERNAL TRACKING SYSTEM DETECTION
-  Before applying any rules below, scan the chat for an existing in-world relationship tracking system — e.g. named relationship scores or any structured block that already tracks feelings or/and affinity numerically between characters.
-  IF the system is detected:
-    - Use it as the authoritative source for the Main feeling value and relationship stage.
-    - Map its scale to 0–1000 proportionally (e.g. if it uses 0–100 scale, multiply by 10 to make it 1000).
-    - Display In The Moment feelings from scene context as usual.
-    - Do NOT override the Main value with your own math — copy it faithfully amd multiply to match 1000-scale.
-    - If the internal system names a feeling or relationship stage, use that name verbatim in the tracker.
+► IMPORTANT: Before applying standard rules described below, scan the narration for an existing in-world tracking system — e.g. any structured block that already tracks feelings or/and affinity for any agent toward user.
+  IF an in-narration feeling tracker is detected:
+    - If the in-world system names a feeling or relationship stage, use that exact name verbatim in the standard tracker.
+    - If the narration does not clearly specify which tracked feeling is the Main one, determine it yourself. If it does specify, follow the narration's lead.
+    - Treat the in-world tracker as the authoritative source for the Main and ITM feeling names and their values.
+    - Map the Main feeling's scale to 0–1000 proportionally (e.g. if the in-world system uses a 0–100 scale, multiply the value by 10 to convert it to the 0–1000 scale).
+    - Derive and display In The Moment feelings from scene context as usual.
+    - Do NOT override the Main feeling's value — copy it faithfully from the in-world tracker, then multiply it only as needed to match the 0–1000 scale.
+
   IF no such system is detected: apply the standard rules below as normal.
-
-Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
-
+  Apply DIFFERENT rules based on whether the agent is physically present in the current scene.
 ON-SCREEN AGENTS (physically in the current scene):
 Main feeling (0–1000): develops slowly. Max +20 pts/in-game day unless a major positive event occurs. Track the amount by adding "daily limit for [DD/MM]: value/20" after the Main feeling value.
 Positive Main → use "+" in valence field. Negative Main → use "-".
