@@ -168,6 +168,28 @@ const VITAL_META = [
     { key: 'stress',      emoji: '🧠', label: 'Stress',      polarity: 'high'   },
 ];
 
+// Strip any non-numeric prefix (emoji labels) so parseFloat works on both
+// raw tracker output ("78") and emoji-labeled form ("🍴78")
+const numVal = (s) => parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')) || 0;
+
+// ─── VITAL EMOJI LABELER ──────────────────────────────────────────────────────
+// Called on raw tracker output once before storing in `mes`.
+// Inserts emoji prefixes onto each of the 7 vital numbers in every AGENT line
+// so the main model reads "🍴78 | 😴85 …" instead of bare "78 | 85 …".
+// The regex only touches fields 4-10 (the vitals); deltas, impulse & condition
+// are left untouched. The ST find-regex is updated to accept the optional prefix.
+function labelVitalsInText(raw) {
+    const emojis = VITAL_META.map(m => m.emoji); // ['🍴','😴','🚿','💧','🚽','🔥','🧠']
+    // Prefix captures: "AGENT:" + field0(gender) | field1(name) | field2(attire) |
+    // Then captures each of the 7 vital fields individually.
+    return raw.replace(
+        /^(AGENT:[^|\r\n]*\|[^|\r\n]*\|[^|\r\n]*\|)\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|/gm,
+        (_, prefix, v1, v2, v3, v4, v5, v6, v7) =>
+            `${prefix} ${emojis[0]}${v1} | ${emojis[1]}${v2} | ${emojis[2]}${v3} | ` +
+            `${emojis[3]}${v4} | ${emojis[4]}${v5} | ${emojis[5]}${v6} | ${emojis[6]}${v7} |`
+    );
+}
+
 function vitalColorClass(polarity, value) {
     if (polarity === 'arousal') return 'enaenn-fill-arousal';
     if (polarity === 'low')     return value >= 50 ? 'enaenn-fill-ok' : value >= 25 ? 'enaenn-fill-warn' : 'enaenn-fill-crit';
@@ -190,13 +212,13 @@ function parseTrackerData(text) {
             data.agents.push({
                 gender: f[0], name: f[1], attire: f[2],
                 vitals: {
-                    satiation:   { val: parseFloat(f[3])  || 0, delta: f[10] },
-                    energy:      { val: parseFloat(f[4])  || 0, delta: f[11] },
-                    cleanliness: { val: parseFloat(f[5])  || 0, delta: f[12] },
-                    thirst:      { val: parseFloat(f[6])  || 0, delta: f[13] },
-                    bladder:     { val: parseFloat(f[7])  || 0, delta: f[14] },
-                    arousal:     { val: parseFloat(f[8])  || 0, delta: f[15] },
-                    stress:      { val: parseFloat(f[9])  || 0, delta: f[16] },
+                    satiation:   { val: numVal(f[3]),  delta: f[10] },
+                    energy:      { val: numVal(f[4]),  delta: f[11] },
+                    cleanliness: { val: numVal(f[5]),  delta: f[12] },
+                    thirst:      { val: numVal(f[6]),  delta: f[13] },
+                    bladder:     { val: numVal(f[7]),  delta: f[14] },
+                    arousal:     { val: numVal(f[8]),  delta: f[15] },
+                    stress:      { val: numVal(f[9]),  delta: f[16] },
                 },
                 impulse:   f[17] || '',
                 condition: (f[18] && f[18] !== '-') ? f[18] : null,
@@ -313,7 +335,7 @@ function archiveTrackerAt(idx) {
 function restoreTrackerAt(idx) {
     const m = chat[idx];
     if (!m || !m.extra?.archived) return;
-    m.mes = m.extra.rawData || m.extra.fullContent || m.mes;
+    m.mes = m.extra.labeledText || m.extra.rawData || m.extra.fullContent || m.mes;
     m.extra.archived = false;
     // Re-inject the pre-built HTML directly so we don't show raw text momentarily
     const html = m.extra.fullContent || buildTrackerHTML(parseTrackerData(m.mes));
@@ -430,20 +452,24 @@ async function callTrackerAPI() {
 let _addOneMessage = null;
 
 async function insertTrackerMessage(rawText) {
-    // Store both the plain text (for next API call) and pre-built HTML (for restore/re-render)
+    // labeledText = emoji-prefixed vitals for main model readability; stored in mes.
+    // rawData     = original tracker output; kept for the next API call ("previous state").
+    // htmlContent = pre-built card HTML; used by restore/re-render and as DOM fallback.
+    const labeledText = labelVitalsInText(rawText);
     const htmlContent = buildTrackerHTML(parseTrackerData(rawText));
 
     const mesObj = {
         name:      'Tracker',
         is_user:   false,
         is_system: false,
-        mes:       rawText,           // plain text — ST regex fires on this and renders the card
+        mes:       labeledText,   // emoji-labeled plain text — kept short for context tokens
         send_date: new Date().toLocaleString(),
         extra: {
             [TRACKER_FLAG]: true,
             type:           'narrator',
-            fullContent:    htmlContent, // pre-built HTML for restore/re-render without regex
-            rawData:        rawText,     // plain text for the next API call's "previous state"
+            fullContent:    htmlContent,  // pre-built HTML for restore/re-render
+            rawData:        rawText,      // original format for the next tracker API call
+            labeledText:    labeledText,  // saved so restore also gives main model labeled text
             archived:       false,
             token_count:    0,
         },
@@ -454,8 +480,17 @@ async function insertTrackerMessage(rawText) {
 
     if (_addOneMessage) {
         try {
-            // addOneMessage triggers ST's rendering pipeline, which fires the regex
+            // addOneMessage triggers ST's rendering pipeline which fires the find-regex.
+            // Placement [1,2] in the regex JSON covers narrator/AI-output messages.
             await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
+
+            // Safety fallback: if the regex didn't fire and transform the text into
+            // the tracker card, inject the pre-built HTML directly so the card always shows.
+            const $el = $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text');
+            if ($el.length && !$el.find('.enaenn-tracker-block').length) {
+                $el.html(htmlContent);
+            }
+
             const $chat = $('#chat');
             $chat.scrollTop($chat[0].scrollHeight);
             return;
@@ -464,7 +499,7 @@ async function insertTrackerMessage(rawText) {
         }
     }
 
-    // DOM fallback — inject pre-built HTML directly
+    // Full DOM fallback — inject pre-built HTML directly
     $('#chat').append(`<div class="mes" mesid="${mesId}" is_system="false"><div class="mes_block"><div class="ch_name"><span class="name_text">Tracker</span></div><div class="mes_text"></div></div></div>`);
     $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(htmlContent);
     $('#chat').scrollTop($('#chat')[0].scrollHeight);
