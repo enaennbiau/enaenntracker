@@ -159,35 +159,70 @@ PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 // ─── VITAL METADATA & COLOR LOGIC ────────────────────────────────────────────
 
 const VITAL_META = [
-    { key: 'satiation',   emoji: '🍴', label: 'Satiation',   polarity: 'low'    },
-    { key: 'energy',      emoji: '😴', label: 'Energy',      polarity: 'low'    },
-    { key: 'cleanliness', emoji: '🚿', label: 'Cleanliness', polarity: 'low'    },
-    { key: 'thirst',      emoji: '💧', label: 'Thirst',      polarity: 'high'   },
-    { key: 'bladder',     emoji: '🚽', label: 'Bladder',     polarity: 'high'   },
-    { key: 'arousal',     emoji: '🔥', label: 'Arousal',     polarity: 'arousal'},
-    { key: 'stress',      emoji: '🧠', label: 'Stress',      polarity: 'high'   },
+    { key: 'satiation',   emoji: '🍴', label: 'Satiation',   text: 'food',    polarity: 'low'    },
+    { key: 'energy',      emoji: '😴', label: 'Energy',      text: 'energy',  polarity: 'low'    },
+    { key: 'cleanliness', emoji: '🚿', label: 'Cleanliness', text: 'hygiene', polarity: 'low'    },
+    { key: 'thirst',      emoji: '💧', label: 'Thirst',      text: 'thirst',  polarity: 'high'   },
+    { key: 'bladder',     emoji: '🚽', label: 'Bladder',     text: 'bladder', polarity: 'high'   },
+    { key: 'arousal',     emoji: '🔥', label: 'Arousal',     text: 'arousal', polarity: 'arousal'},
+    { key: 'stress',      emoji: '🧠', label: 'Stress',      text: 'stress',  polarity: 'high'   },
 ];
 
-// Strip any non-numeric prefix (emoji labels) so parseFloat works on both
-// raw tracker output ("78") and emoji-labeled form ("🍴78")
+// Strip any non-numeric prefix (word labels, emoji) so parseFloat works on
+// both raw ("76") and labeled ("food:76" or "🍴76") vital strings.
 const numVal = (s) => parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')) || 0;
 
-// ─── VITAL EMOJI LABELER ──────────────────────────────────────────────────────
-// Called on raw tracker output once before storing in `mes`.
-// Inserts emoji prefixes onto each of the 7 vital numbers in every AGENT line
-// so the main model reads "🍴78 | 😴85 …" instead of bare "78 | 85 …".
-// The regex only touches fields 4-10 (the vitals); deltas, impulse & condition
-// are left untouched. The ST find-regex is updated to accept the optional prefix.
-function labelVitalsInText(raw) {
-    const emojis = VITAL_META.map(m => m.emoji); // ['🍴','😴','🚿','💧','🚽','🔥','🧠']
-    // Prefix captures: "AGENT:" + field0(gender) | field1(name) | field2(attire) |
-    // Then captures each of the 7 vital fields individually.
-    return raw.replace(
-        /^(AGENT:[^|\r\n]*\|[^|\r\n]*\|[^|\r\n]*\|)\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|\s*([^|\r\n]+?)\s*\|/gm,
-        (_, prefix, v1, v2, v3, v4, v5, v6, v7) =>
-            `${prefix} ${emojis[0]}${v1} | ${emojis[1]}${v2} | ${emojis[2]}${v3} | ` +
-            `${emojis[3]}${v4} | ${emojis[4]}${v5} | ${emojis[5]}${v6} | ${emojis[6]}${v7} |`
-    );
+// ─── TRACKER CONTEXT FORMATTER ───────────────────────────────────────────────
+// Transforms the raw tracker output (LOC/AGENT/REL pipe format) into a labeled,
+// human-readable format stored in `mes` so the main model understands each field.
+//
+//  AGENT vitals:  76 | 83 | …  →  food:76 | energy:83 | hygiene:90 | …
+//  AGENT deltas: -2 | -2 | …   →  Δfood:-2 | Δenergy:-2 | …
+//  REL:           →  RELATIONSHIP:
+//  OFFSCREEN vitals: fine | rested | …  →  food:fine | energy:rested | hygiene:fresh | …
+//
+// The SillyTavern find-regex is updated to match this labeled format and still
+// renders the same emoji-illustrated HTML card.
+//
+// OFFSCREEN vital order differs from AGENT (bladder/thirst are swapped):
+const OFFSCREEN_VITAL_TEXTS = ['food', 'energy', 'hygiene', 'bladder', 'thirst', 'arousal', 'stress'];
+
+function formatTrackerForContext(raw) {
+    return raw.split('\n').map(line => {
+        const t = line.trim();
+        if (!t) return line;
+
+        if (t.startsWith('AGENT:')) {
+            const parts = t.slice('AGENT:'.length).split('|').map(s => s.trim());
+            if (parts.length < 19) return line;
+            const vt = VITAL_META.map(m => m.text); // food, energy, hygiene, thirst, bladder, arousal, stress
+            for (let i = 0; i < 7; i++) {
+                // Strip any existing emoji prefix (from a previous labeling pass) before re-labeling
+                const rawVal = parts[3 + i].replace(/^[^\d-+.]+/, '');
+                const rawDel = parts[10 + i].replace(/^Δ\w+:/, '');
+                parts[3 + i]  = `${vt[i]}:${rawVal}`;
+                parts[10 + i] = `Δ${vt[i]}:${rawDel}`;
+            }
+            return 'AGENT: ' + parts.join(' | ');
+        }
+
+        if (t.startsWith('REL:')) {
+            return 'RELATIONSHIP:' + t.slice('REL:'.length);
+        }
+
+        if (t.startsWith('OFFSCREEN:')) {
+            const parts = t.slice('OFFSCREEN:'.length).split('|').map(s => s.trim());
+            if (parts.length < 12) return line;
+            // Fields 4–10 are descriptive vital words (fine, rested, fresh…)
+            for (let i = 0; i < 7; i++) {
+                const rawVal = parts[4 + i].replace(/^\w+:/, ''); // strip existing label if any
+                parts[4 + i] = `${OFFSCREEN_VITAL_TEXTS[i]}:${rawVal}`;
+            }
+            return 'OFFSCREEN: ' + parts.join(' | ');
+        }
+
+        return line;
+    }).join('\n');
 }
 
 function vitalColorClass(polarity, value) {
@@ -223,8 +258,9 @@ function parseTrackerData(text) {
                 impulse:   f[17] || '',
                 condition: (f[18] && f[18] !== '-') ? f[18] : null,
             });
-        } else if (line.startsWith('REL:')) {
-            const f = p('REL:');
+        } else if (line.startsWith('RELATIONSHIP:') || line.startsWith('REL:')) {
+            const prefix = line.startsWith('RELATIONSHIP:') ? 'RELATIONSHIP:' : 'REL:';
+            const f = p(prefix);
             if (f.length < 6) continue;
             const itm = [];
             for (let i = 6; i + 2 < f.length; i += 3) {
@@ -455,7 +491,7 @@ async function insertTrackerMessage(rawText) {
     // labeledText = emoji-prefixed vitals for main model readability; stored in mes.
     // rawData     = original tracker output; kept for the next API call ("previous state").
     // htmlContent = pre-built card HTML; used by restore/re-render and as DOM fallback.
-    const labeledText = labelVitalsInText(rawText);
+    const labeledText = formatTrackerForContext(rawText);
     const htmlContent = buildTrackerHTML(parseTrackerData(rawText));
 
     const mesObj = {
