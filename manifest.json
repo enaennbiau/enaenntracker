@@ -1,10 +1,12 @@
 {
-  "display_name": "enaennTracker",
-  "version": "1.0.0",
-  "author": "enaenn",
-  "homePage": "",
-  "auto_update": false,
-  "js": "index.js",
-  "css": "style.css",
-  "generate_interceptor": false
+    "display_name": "enaennTracker",
+    "loading_order": 1,
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "author": "you",
+    "version": "1.0.0",
+    "homePage": "",
+    "auto_update": false
 }

@@ -13,6 +13,7 @@ import {
 import {
     extension_settings,
     getContext,
+    setExtensionPrompt,
 } from '../../../extensions.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -510,18 +511,21 @@ function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
     if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
     setSnapshots(chatId, snaps);
     updateOverlayContent(chatId);
+    refreshInjection();
 }
 
 function restorePreviousSnapshot(chatId) {
     let snaps = getSnapshots(chatId);
     if (snaps.length <= 1) {
         setSnapshots(chatId, []);
+        refreshInjection();
         return null;
     }
     snaps.pop();
     setSnapshots(chatId, snaps);
     const restored = snaps[snaps.length - 1] || null;
     updateOverlayContent(chatId);
+    refreshInjection();
     return restored;
 }
 
@@ -649,6 +653,28 @@ function getInjectionText(chatId) {
     const snap = getCurrentSnapshot(chatId);
     if (!snap) return '';
     return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
+}
+
+// setExtensionPrompt is ST's official API for injecting text into the
+// assembled prompt. Position 1 = after system prompt, before chat history.
+// depth 0 = as close to the current message as possible (before last user msg).
+// We call it once on init and then refresh it every time the snapshot changes,
+// rather than relying on the GENERATE_AFTER_COMBINE_PROMPTS event args (whose
+// shape isn't reliable across ST versions).
+const INJECTION_KEY = 'enaennTracker_state';
+
+function refreshInjection() {
+    if (!S().enabled) {
+        setExtensionPrompt(INJECTION_KEY, '', 1, 0);
+        return;
+    }
+    const chatId    = getChatId();
+    const injection = getInjectionText(chatId);
+    if (!injection) {
+        setExtensionPrompt(INJECTION_KEY, '', 1, 0);
+        return;
+    }
+    setExtensionPrompt(INJECTION_KEY, injection.trim(), 1, 0);
 }
 
 // ─── BUILD TRACKER PROMPT ─────────────────────────────────────────────────────
@@ -1233,7 +1259,7 @@ const SETTINGS_HTML = `
 // ─── BIND UI ──────────────────────────────────────────────────────────────────
 
 function bindUI() {
-    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
+    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); refreshInjection(); });
     $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
     $('#enaennTracker_ctxSize').on('change',    function () { save({ contextMessages: Math.max(5,  parseInt(this.value) || 20) }); });
     $('#enaennTracker_windowSize').on('change', function () {
@@ -1391,6 +1417,7 @@ jQuery(async () => {
     const chatId = getChatId();
     updateOverlayContent(chatId);
     toggleOverlay(S().overlayVisible);
+    refreshInjection();
 
     // Restore last-gen stats if we have them (they don't survive page reload
     // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
@@ -1412,24 +1439,11 @@ jQuery(async () => {
     }
 
     // ─── Context injection (tracker state → main chat AI only) ────────────
-    eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
-        if (!S().enabled) return;
-        const chatId    = getChatId();
-        const injection = getInjectionText(chatId);
-        if (!injection) return;
-
-        if (args && typeof args === 'object') {
-            if (args.prompt !== undefined) {
-                args.prompt += injection;
-            } else if (Array.isArray(args.messages)) {
-                let insertIdx = args.messages.length;
-                for (let i = args.messages.length - 1; i >= 0; i--) {
-                    if (args.messages[i].role === 'user') { insertIdx = i; break; }
-                }
-                args.messages.splice(insertIdx, 0, { role: 'system', content: injection.trim() });
-            }
-        }
-    });
+    // Handled via setExtensionPrompt (see refreshInjection()), which is called
+    // on init, on chat change, whenever a snapshot is saved/restored, and when
+    // the enabled toggle changes. ST reads from its extension-prompt registry
+    // during prompt assembly, so there's no dependency on GENERATE_AFTER_COMBINE_PROMPTS
+    // event args (whose shape proved unreliable — args was undefined at fire time).
 
     // ─── Auto-update after each reply ─────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
@@ -1449,6 +1463,7 @@ jQuery(async () => {
         _wiCache = [];              // stale WI entries from previous chat are meaningless
         _wiCacheTimestamp = 0;
         if (S().overlayVisible) toggleOverlay(true);
+        refreshInjection();
     });
 
     // ─── Keep profile dropdown in sync ─────────────────────────────────────
