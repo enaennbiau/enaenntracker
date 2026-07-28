@@ -759,3 +759,38 @@
     font-size: 0.75em;
     padding: 4px 2px;
 }
+
+/* ── API connection settings (Connection Profile / Quick API) ───── */
+.enaenn-api-drawer {
+    border: 1px solid #555;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: rgba(255,255,255,0.03);
+}
+.enaenn-api-drawer summary {
+    cursor: pointer;
+    padding: 8px 10px;
+    font-weight: bold;
+    font-size: 0.9em;
+    list-style: none;
+}
+.enaenn-api-drawer summary::-webkit-details-marker { display: none; }
+.enaenn-api-drawer summary::before {
+    content: '▸';
+    display: inline-block;
+    width: 1em;
+    transition: transform 0.15s;
+}
+.enaenn-api-drawer[open] summary::before {
+    transform: rotate(90deg);
+}
+.enaenn-api-drawer-body {
+    padding: 4px 10px 10px;
+}
+.enaenn-api-status {
+    font-size: 0.8em;
+    padding: 4px 0 8px;
+}
+.enaenn-status-inactive { opacity: 0.6; }
+.enaenn-status-warning   { color: #e0b040; }
+.enaenn-status-active    { color: #7abf7a; }

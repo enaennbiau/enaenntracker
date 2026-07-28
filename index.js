@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS = {
     autoUpdate:         true,
     contextMessages:    20,
     windowSize:         7,              // snapshots kept per chat
-    overlayVisible:     false,          // start hidden
+    overlayVisible:     true,           // visible by default so new users actually see it
     trackerStates:      {},             // { chatId: [ snapshot, ... ] }
 
     // ─── API connection (three-tier, same priority as ST-Meddler) ─────────
@@ -372,7 +372,7 @@ function restorePreviousSnapshot(chatId) {
 // ─── OVERLAY CREATION ─────────────────────────────────────────────────────────
 
 let overlayVisible = false;
-let overlayCollapsed = true;
+let overlayCollapsed = false;
 
 function createOverlay() {
     if (document.getElementById('enaenn-overlay')) return;
@@ -441,9 +441,10 @@ function createOverlay() {
         toggleOverlay(false);
     });
 
-    // initial state
-    overlay.classList.add('collapsed');
-    collapseBtn.textContent = '▸';
+    // initial state — starts expanded; visibility is set right after creation by
+    // the init code, based on the saved (or default) overlayVisible setting.
+    collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
+    overlay.classList.toggle('collapsed', overlayCollapsed);
     overlay.style.display = 'none';
 }
 
@@ -1093,7 +1094,15 @@ function addToolbarButton() {
     if ($('#enaennTracker_toolbarBtn').length) return;
     const $btn = $(`<div id="enaennTracker_toolbarBtn" title="Toggle enaennTracker overlay" class="interactable">📊</div>`);
     $btn.on('click', () => toggleOverlay());
-    $('#send_but_sheld').prepend($btn);
+
+    // '#send_but_sheld' is the usual spot, but ST versions/themes can differ —
+    // fall back to a couple of other known containers before giving up.
+    const targets = ['#send_but_sheld', '#rightSendForm', '#form_sheld'];
+    for (const sel of targets) {
+        const $target = $(sel);
+        if ($target.length) { $target.prepend($btn); return; }
+    }
+    console.warn('[enaennTracker] Could not find a toolbar container to add the 📊 button to. Use the "Show/Hide Overlay" button in the extension settings instead.');
 }
 
 // ─── INIT ────────────────────────────────────────────────────────────────────
