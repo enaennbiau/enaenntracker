@@ -7,13 +7,11 @@ import {
     event_types,
     saveSettingsDebounced,
     chat,
-    getRequestHeaders,
-    settings,               // main ST settings (contains api_profiles)
-    getContext,
 } from '../../../../script.js';
 
 import {
     extension_settings,
+    getContext,
 } from '../../../extensions.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -491,79 +489,23 @@ function buildTrackerPrompt(chatId) {
     );
 }
 
-// ─── API CALL (using ST profiles) ───────────────────────────────────────────
-
-function resolveProfile() {
-    const selected = S().selectedProfile || 'same';
-    if (selected === 'same') {
-        // Use the currently active main API profile
-        const mainProfile = settings.api_profiles?.find(p => p.active) || settings.api_profiles?.[0];
-        if (!mainProfile) {
-            toastr.warning('No active main API profile found. Please select one in SillyTavern settings.');
-            return null;
-        }
-        return {
-            endpoint: mainProfile.endpoint || '',
-            apiKey:   mainProfile.apiKey   || '',
-            model:    mainProfile.model    || '',
-        };
-    } else {
-        // Find by name
-        const profile = settings.api_profiles?.find(p => p.name === selected);
-        if (!profile) {
-            toastr.warning(`Profile "${selected}" not found. Please check your API profiles.`);
-            return null;
-        }
-        return {
-            endpoint: profile.endpoint || '',
-            apiKey:   profile.apiKey   || '',
-            model:    profile.model    || '',
-        };
-    }
-}
+// ─── API CALL (uses ST's currently connected main API) ─────────────────────
+// NOTE: We rely on SillyTavern's own generateRaw() helper instead of manually
+// building a fetch request. generateRaw() automatically talks to whatever
+// API you already have connected in SillyTavern (Claude, OpenAI, a local
+// model, anything) — it doesn't matter which one, so there's no separate
+// "profile" to configure or get wrong.
 
 async function callTrackerAPI(chatId) {
-    const profile = resolveProfile();
-    if (!profile) return null;
-
-    const { endpoint, apiKey, model } = profile;
-    if (!endpoint || !model) {
-        toastr.warning('Tracker profile is missing Endpoint or Model.');
-        return null;
-    }
-
+    const ctx = getContext();
     const userMessage = buildTrackerPrompt(chatId);
 
     try {
-        const response = await fetch('/api/backends/chat-completions/generate', {
-            method:  'POST',
-            headers: getRequestHeaders(),
-            body: JSON.stringify({
-                chat_completion_source: 'openai',
-                reverse_proxy:  endpoint,
-                proxy_password: apiKey,
-                model:       model,
-                messages: [
-                    { role: 'system', content: TRACKER_SYSTEM_PROMPT },
-                    { role: 'user',   content: userMessage },
-                ],
-                max_tokens:        600,
-                temperature:       0.2,
-                stream:            false,
-                top_p:             1,
-                presence_penalty:  0,
-                frequency_penalty: 0,
-            }),
+        const rawResult = await ctx.generateRaw({
+            prompt:       userMessage,
+            systemPrompt: TRACKER_SYSTEM_PROMPT,
         });
-
-        if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`ST backend returned HTTP ${response.status}: ${errText.slice(0, 400)}`);
-        }
-
-        const data = await response.json();
-        return data.choices?.[0]?.message?.content?.trim() ?? null;
-
+        return rawResult ? rawResult.trim() : null;
     } catch (err) {
         console.error('[enaennTracker]', err);
         toastr.error(`enaennTracker: ${err.message}`);
@@ -660,12 +602,8 @@ const SETTINGS_HTML = `
 
       <hr />
 
-      <div class="enaenn-gap" style="font-weight:bold;">Tracker API Connection</div>
       <div style="font-size:0.78em; opacity:0.6; margin-bottom:6px;">
-        Choose a profile from your main SillyTavern API connections, or use the currently active main API.
-      </div>
-      <div class="flex-container flexGap5 enaenn-gap">
-        <select id="enaennTracker_profileSelect" class="text_pole flex1"></select>
+        The tracker uses whatever main API you currently have connected in SillyTavern — no separate setup needed.
       </div>
 
       <hr />
@@ -682,21 +620,6 @@ const SETTINGS_HTML = `
 
 // ─── BIND UI ─────────────────────────────────────────────────────────────────
 
-function refreshProfileSelect() {
-    const $sel = $('#enaennTracker_profileSelect').empty();
-    $sel.append('<option value="same">✦ Same As Main API</option>');
-    const profiles = settings.api_profiles || [];
-    if (profiles.length === 0) {
-        $sel.append('<option value="" disabled>— No profiles found —</option>');
-    } else {
-        profiles.forEach(p => {
-            const name = p.name || 'Unnamed';
-            $sel.append(`<option value="${esc(name)}">${esc(name)}</option>`);
-        });
-    }
-    $sel.val(S().selectedProfile || 'same');
-}
-
 function bindUI() {
     $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
     $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
@@ -707,10 +630,6 @@ function bindUI() {
         const chatId = getChatId();
         const snaps = getSnapshots(chatId);
         if (snaps.length > v) setSnapshots(chatId, snaps.slice(-v));
-    });
-
-    $('#enaennTracker_profileSelect').on('change', function () {
-        save({ selectedProfile: this.value });
     });
 
     $('#enaennTracker_toggleOverlayBtn').on('click', () => toggleOverlay());
@@ -748,7 +667,6 @@ jQuery(async () => {
     $('#enaennTracker_windowSize').val(S().windowSize);
 
     $('#extensions_settings2').append(SETTINGS_HTML);
-    refreshProfileSelect();
     bindUI();
     addToolbarButton();
 
@@ -756,7 +674,7 @@ jQuery(async () => {
     updateOverlayContent(chatId);
 
     // ─── CONTEXT INJECTION ────────────────────────────────────────────────
-    eventSource.on(event_types.GENERATE_AFTER_COMBINE, (args) => {
+    eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
         if (!S().enabled) return;
         const chatId = getChatId();
         const injection = getInjectionText(chatId);
