@@ -13,6 +13,7 @@ import {
 import {
     extension_settings,
     getContext,
+    setExtensionPrompt,
 } from '../../../extensions.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -510,18 +511,21 @@ function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
     if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
     setSnapshots(chatId, snaps);
     updateOverlayContent(chatId);
+    refreshInjection();
 }
 
 function restorePreviousSnapshot(chatId) {
     let snaps = getSnapshots(chatId);
     if (snaps.length <= 1) {
         setSnapshots(chatId, []);
+        refreshInjection();
         return null;
     }
     snaps.pop();
     setSnapshots(chatId, snaps);
     const restored = snaps[snaps.length - 1] || null;
     updateOverlayContent(chatId);
+    refreshInjection();
     return restored;
 }
 
@@ -640,15 +644,29 @@ function updateOverlayContent(chatId) {
         : '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
 }
 
-// ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
-// NOTE: Only the compact tracker state (LOC/AGENT/REL/etc.) is ever injected
-// into the main chat context. Character description and world info are sent
-// exclusively to the tracker's own API call and never reach the chat AI.
+// ─── CONTEXT INJECTION (tracker state → main chat AI only) ────────────
+// setExtensionPrompt is ST's official API for injecting text into the
+// assembled prompt. Position 1 = after system prompt, before chat history.
+// depth 0 = as close to the current message as possible (before last user msg).
+// We call it once on init and then refresh it every time the snapshot changes.
 
-function getInjectionText(chatId) {
-    const snap = getCurrentSnapshot(chatId);
-    if (!snap) return '';
-    return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
+const INJECTION_KEY = 'enaennTracker_state';
+
+function refreshInjection() {
+    if (!S().enabled) {
+        setExtensionPrompt(INJECTION_KEY, '', 1, 0);
+        return;
+    }
+    const chatId = getChatId();
+    const snap   = getCurrentSnapshot(chatId);
+    if (!snap) {
+        setExtensionPrompt(INJECTION_KEY, '', 1, 0);
+        return;
+    }
+    const text = `[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]`;
+    // Position 1 = after system prompt / before chat history
+    // depth 0 = injected closest to the current generation point
+    setExtensionPrompt(INJECTION_KEY, text, 1, 0);
 }
 
 // ─── BUILD TRACKER PROMPT ─────────────────────────────────────────────────────
@@ -1233,7 +1251,10 @@ const SETTINGS_HTML = `
 // ─── BIND UI ──────────────────────────────────────────────────────────────────
 
 function bindUI() {
-    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
+    $('#enaennTracker_enabled').on('change',    function () {
+        save({ enabled: this.checked });
+        refreshInjection();
+    });
     $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
     $('#enaennTracker_ctxSize').on('change',    function () { save({ contextMessages: Math.max(5,  parseInt(this.value) || 20) }); });
     $('#enaennTracker_windowSize').on('change', function () {
@@ -1391,6 +1412,7 @@ jQuery(async () => {
     const chatId = getChatId();
     updateOverlayContent(chatId);
     toggleOverlay(S().overlayVisible);
+    refreshInjection();
 
     // Restore last-gen stats if we have them (they don't survive page reload
     // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
@@ -1411,26 +1433,6 @@ jQuery(async () => {
         console.warn('[enaennTracker] event_types.WORLDINFO_USED not found — using fallback event name "worldinfo_used"');
     }
 
-    // ─── Context injection (tracker state → main chat AI only) ────────────
-    eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
-        if (!S().enabled) return;
-        const chatId    = getChatId();
-        const injection = getInjectionText(chatId);
-        if (!injection) return;
-
-        if (args && typeof args === 'object') {
-            if (args.prompt !== undefined) {
-                args.prompt += injection;
-            } else if (Array.isArray(args.messages)) {
-                let insertIdx = args.messages.length;
-                for (let i = args.messages.length - 1; i >= 0; i--) {
-                    if (args.messages[i].role === 'user') { insertIdx = i; break; }
-                }
-                args.messages.splice(insertIdx, 0, { role: 'system', content: injection.trim() });
-            }
-        }
-    });
-
     // ─── Auto-update after each reply ─────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (S().enabled && S().autoUpdate) {
@@ -1449,6 +1451,7 @@ jQuery(async () => {
         _wiCache = [];              // stale WI entries from previous chat are meaningless
         _wiCacheTimestamp = 0;
         if (S().overlayVisible) toggleOverlay(true);
+        refreshInjection();
     });
 
     // ─── Keep profile dropdown in sync ─────────────────────────────────────
