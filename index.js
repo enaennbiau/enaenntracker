@@ -30,6 +30,7 @@ const DEFAULT_SETTINGS = {
     windowSize:         7,
     trackerMaxTokens: 1500,
     overlayVisible:     true,
+    overlayPosPct:      null,
     trackerStates:      {},
 
     // ─── Character & World Info ───────────────────────────────────────────
@@ -556,8 +557,62 @@ function clearGenStats() {
 
 // ─── OVERLAY CREATION ─────────────────────────────────────────────────────────
 
-let overlayVisible  = false;
+let overlayVisible   = false;
 let overlayCollapsed = false;
+
+function getViewport() {
+    const v = window.visualViewport;
+    return {
+        w:  v ? v.width      : window.innerWidth,
+        h:  v ? v.height     : window.innerHeight,
+        ox: v ? v.offsetLeft : 0,
+        oy: v ? v.offsetTop  : 0,
+    };
+}
+
+// Turns a saved {xPct, yPct} (or lack thereof) into a clamped on-screen pixel spot.
+function computeOverlayPosition(vw, vh, w, h) {
+    const pct = S().overlayPosPct;
+    let left, top;
+
+    if (pct && typeof pct.xPct === 'number' && typeof pct.yPct === 'number') {
+        left = pct.xPct * vw;
+        top  = pct.yPct * vh;
+    } else {
+        // No saved position yet → dead-center (first install, or after Clear)
+        left = (vw - w) / 2;
+        top  = (vh - h) / 2;
+    }
+
+    // Always keep the whole panel inside the visible viewport
+    left = Math.min(Math.max(left, 4), Math.max(4, vw - w - 4));
+    top  = Math.min(Math.max(top,  4), Math.max(4, vh - h - 4));
+    return { left, top };
+}
+
+function positionOverlaySafely() {
+    const overlay = document.getElementById('enaenn-overlay');
+    if (!overlay || overlay.style.display === 'none') return;
+
+    const { w: vw, h: vh, ox, oy } = getViewport();
+    const isNarrow = vw < 700;
+
+    if (isNarrow) {
+        overlay.style.width = Math.round(vw * 0.94) + 'px';
+        if (!overlayCollapsed) {
+            overlay.style.height = Math.round(Math.min(vh * 0.5, 340)) + 'px';
+        }
+    }
+
+    const w = overlay.offsetWidth  || 340;
+    const h = overlay.offsetHeight || 220;
+    const { left, top } = computeOverlayPosition(vw, vh, w, h);
+
+    overlay.style.left   = (ox + left) + 'px';
+    overlay.style.top    = (oy + top)  + 'px';
+    overlay.style.right  = 'auto';
+    overlay.style.bottom = 'auto';
+}
 
 function createOverlay() {
     if (document.getElementById('enaenn-overlay')) return;
@@ -576,54 +631,75 @@ function createOverlay() {
     `;
     document.body.appendChild(overlay);
 
-    let isDragging = false, startX, startY, origX, origY;
+    // ── Dragging (pointer events = mouse + touch + pen, all in one) ──────
     const header = overlay.querySelector('#enaenn-overlay-header');
-    const onDragStart = (e) => {
+    let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0, pointerId = null;
+
+    header.addEventListener('pointerdown', (e) => {
         if (e.target.closest('button')) return;
-        isDragging = true;
-        const rect  = overlay.getBoundingClientRect();
-        const touch = e.touches ? e.touches[0] : e;
-        startX = touch.clientX; startY = touch.clientY;
-        origX  = rect.left;     origY  = rect.top;
-        document.addEventListener('mousemove', onDragMove);
-        document.addEventListener('touchmove', onDragMove, { passive: false });
-        document.addEventListener('mouseup',   onDragEnd);
-        document.addEventListener('touchend',  onDragEnd);
+        dragging  = true;
+        pointerId = e.pointerId;
+        header.setPointerCapture(pointerId);
+
+        const rect = overlay.getBoundingClientRect();
+        startX = e.clientX; startY = e.clientY;
+        origX  = rect.left; origY  = rect.top;
         e.preventDefault();
-    };
-    const onDragMove = (e) => {
-        if (!isDragging) return;
-        const touch = e.touches ? e.touches[0] : e;
-        overlay.style.left   = (origX + touch.clientX - startX) + 'px';
-        overlay.style.top    = (origY + touch.clientY - startY) + 'px';
+    });
+
+    header.addEventListener('pointermove', (e) => {
+        if (!dragging || e.pointerId !== pointerId) return;
+        const { w: vw, h: vh, ox, oy } = getViewport();
+        const w = overlay.offsetWidth, h = overlay.offsetHeight;
+
+        let left = origX + e.clientX - startX;
+        let top  = origY + e.clientY - startY;
+        left = Math.min(Math.max(left, ox + 4), ox + vw - w - 4);
+        top  = Math.min(Math.max(top,  oy + 4), oy + vh - h - 4);
+
+        overlay.style.left   = left + 'px';
+        overlay.style.top    = top  + 'px';
         overlay.style.right  = 'auto';
         overlay.style.bottom = 'auto';
         e.preventDefault();
-    };
-    const onDragEnd = () => {
-        isDragging = false;
-        document.removeEventListener('mousemove', onDragMove);
-        document.removeEventListener('touchmove', onDragMove);
-        document.removeEventListener('mouseup',   onDragEnd);
-        document.removeEventListener('touchend',  onDragEnd);
-    };
-    header.addEventListener('mousedown', onDragStart);
-    header.addEventListener('touchstart', onDragStart);
+    });
 
+    const endDrag = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        try { header.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+
+        // Persist final position as a % of the current viewport
+        const { w: vw, h: vh, ox, oy } = getViewport();
+        const rect = overlay.getBoundingClientRect();
+        const xPct = (rect.left - ox) / vw;
+        const yPct = (rect.top  - oy) / vh;
+        save({ overlayPosPct: { xPct, yPct } });
+    };
+    header.addEventListener('pointerup',     endDrag);
+    header.addEventListener('pointercancel', endDrag);
+
+    // ── Buttons ──
     const collapseBtn = overlay.querySelector('#enaenn-overlay-collapse');
     collapseBtn.addEventListener('click', () => {
         overlayCollapsed = !overlayCollapsed;
         overlay.classList.toggle('collapsed', overlayCollapsed);
         collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
+        positionOverlaySafely();
     });
 
-    overlay.querySelector('#enaenn-overlay-close').addEventListener('click', () => {
-        toggleOverlay(false);
-    });
+    overlay.querySelector('#enaenn-overlay-close')
+        .addEventListener('click', () => toggleOverlay(false));
 
     collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
     overlay.classList.toggle('collapsed', overlayCollapsed);
     overlay.style.display = 'none';
+
+    // ── Re-clamp on rotation / keyboard opening / window resize ──
+    window.visualViewport?.addEventListener('resize', () => positionOverlaySafely());
+    window.visualViewport?.addEventListener('scroll', () => positionOverlaySafely());
+    window.addEventListener('orientationchange', () => setTimeout(positionOverlaySafely, 350));
+    window.addEventListener('resize', () => positionOverlaySafely());
 }
 
 function toggleOverlay(show) {
@@ -631,6 +707,7 @@ function toggleOverlay(show) {
     if (!overlay) return;
     overlayVisible = (show !== undefined) ? Boolean(show) : !overlayVisible;
     overlay.style.display = overlayVisible ? 'block' : 'none';
+    if (overlayVisible) positionOverlaySafely();
     save({ overlayVisible });
 }
 
