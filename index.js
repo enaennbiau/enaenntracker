@@ -7,6 +7,7 @@ import {
     event_types,
     saveSettingsDebounced,
     chat,
+    getRequestHeaders,
 } from '../../../../script.js';
 
 import {
@@ -24,9 +25,18 @@ const DEFAULT_SETTINGS = {
     autoUpdate:         true,
     contextMessages:    20,
     windowSize:         7,              // snapshots kept per chat
-    selectedProfile:    'same',         // 'same' or profile name
     overlayVisible:     false,          // start hidden
     trackerStates:      {},             // { chatId: [ snapshot, ... ] }
+
+    // ─── API connection (three-tier, same priority as ST-Meddler) ─────────
+    // 1) Quick API (manual URL/key/model) if enabled
+    // 2) SillyTavern Connection Manager profile, if one is selected
+    // 3) Fallback: whatever main API is currently active in SillyTavern
+    connectionProfile:  '',             // name of a Connection Manager profile, or '' = use active ST API
+    quickApiEnabled:    false,
+    quickApiUrl:        '',
+    quickApiKey:        '',
+    quickApiModel:      '',
 };
 
 // ─── TRACKER SYSTEM PROMPT (unchanged) ──────────────────────────────────────
@@ -489,18 +499,306 @@ function buildTrackerPrompt(chatId) {
     );
 }
 
-// ─── API CALL (uses ST's currently connected main API) ─────────────────────
-// NOTE: We rely on SillyTavern's own generateRaw() helper instead of manually
-// building a fetch request. generateRaw() automatically talks to whatever
-// API you already have connected in SillyTavern (Claude, OpenAI, a local
-// model, anything) — it doesn't matter which one, so there's no separate
-// "profile" to configure or get wrong.
+// ─── QUICK API (manual URL / key / model — direct OpenAI-compatible POST) ──
+// This talks straight to whatever OpenAI-compatible endpoint you type in,
+// completely bypassing SillyTavern's own connection. Useful for pointing
+// the tracker at a different server/model than your main roleplay API.
+
+async function postQuickApi(messages, max_tokens) {
+    const s = S();
+    const base = s.quickApiUrl.replace(/\/+$/, '');
+    const headers = { 'Content-Type': 'application/json' };
+    if (s.quickApiKey) headers['Authorization'] = `Bearer ${s.quickApiKey}`;
+
+    const res = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model: s.quickApiModel, messages, max_tokens, temperature: 0.2 }),
+    });
+
+    if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`HTTP ${res.status}${text ? ': ' + text.slice(0, 200) : ''}`);
+    }
+
+    const json = await res.json();
+    return json.choices?.[0]?.message?.content?.trim() || '';
+}
+
+async function generateWithQuickApi(userMessage) {
+    const messages = [
+        { role: 'system', content: TRACKER_SYSTEM_PROMPT },
+        { role: 'user',   content: userMessage },
+    ];
+    return postQuickApi(messages, 700);
+}
+
+async function fetchQuickApiModels() {
+    const s = S();
+    const btn    = document.getElementById('enaennTracker_quickapiFetchModels');
+    const hint   = document.getElementById('enaennTracker_modelsHint');
+    const select = document.getElementById('enaennTracker_quickapiModelSelect');
+
+    if (!s.quickApiUrl) {
+        if (hint) { hint.textContent = '⚠️ Enter the API URL first'; hint.style.display = 'block'; }
+        return;
+    }
+
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+    if (hint) { hint.textContent = 'Loading…'; hint.style.display = 'block'; }
+
+    try {
+        const headers = {};
+        if (s.quickApiKey) headers['Authorization'] = `Bearer ${s.quickApiKey}`;
+        const res = await fetch(`${s.quickApiUrl.replace(/\/+$/, '')}/models`, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const models = (json.data || json.models || []).map(m => m.id || m).filter(Boolean).sort();
+
+        if (select) {
+            select.innerHTML = '<option value="">— select a model —</option>';
+            models.forEach(id => {
+                const opt = document.createElement('option');
+                opt.value = id;
+                opt.textContent = id;
+                if (s.quickApiModel === id) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+        if (hint) { hint.textContent = `✓ ${models.length} models loaded`; hint.style.display = 'block'; }
+    } catch (e) {
+        if (hint) { hint.textContent = `✗ ${e.message}`; hint.style.display = 'block'; }
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-rotate"></i>'; }
+    }
+}
+
+function updateQuickApiStatus() {
+    const s = S();
+    const el = document.getElementById('enaennTracker_quickapiStatus');
+    if (!el) return;
+    if (!s.quickApiEnabled) { el.innerHTML = '<span class="enaenn-status-inactive">Quick API disabled</span>'; return; }
+    if (!s.quickApiUrl)     { el.innerHTML = '<span class="enaenn-status-warning">⚠️ Enter the API URL</span>'; return; }
+    if (!s.quickApiModel)   { el.innerHTML = '<span class="enaenn-status-warning">⚠️ Enter a model name</span>'; return; }
+    el.innerHTML = `<span class="enaenn-status-active">✓ ${esc(s.quickApiUrl)} → <strong>${esc(s.quickApiModel)}</strong></span>`;
+}
+
+async function connectQuickApi() {
+    const s = S();
+    if (!s.quickApiEnabled) { toastr.warning('Enable Quick API first!'); return; }
+    if (!s.quickApiUrl)     { toastr.warning('Enter the API URL!'); return; }
+    if (!s.quickApiModel)   { toastr.warning('Enter a model name!'); return; }
+
+    const btn = document.getElementById('enaennTracker_quickapiConnect');
+    const orig = btn?.innerHTML;
+    try {
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking…'; }
+        const headers = {};
+        if (s.quickApiKey) headers['Authorization'] = `Bearer ${s.quickApiKey}`;
+        const res = await fetch(`${s.quickApiUrl.replace(/\/+$/, '')}/models`, { headers });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-check"></i> Reachable!';
+        setTimeout(() => { if (btn) { btn.innerHTML = orig; btn.disabled = false; } }, 2000);
+    } catch (e) {
+        if (btn) { btn.innerHTML = '<i class="fa-solid fa-xmark"></i> Error'; setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000); }
+        toastr.error(`Could not connect: ${e.message}`);
+    }
+}
+
+// ─── CONNECTION MANAGER PROFILE (ST's own saved profiles) ───────────────────
+// Sends a request through a specific SillyTavern Connection Manager profile
+// without touching/switching the profile that's actively selected in ST.
+
+const PROFILE_API_TO_SECRET_KEY = {
+    'oai':               'api_key_openai',
+    'google':            'api_key_makersuite',
+    'openrouter-text':   'api_key_openrouter',
+    'kcpp':              'api_key_koboldcpp',
+    'oobabooga':         'api_key_ooba',
+    'textgenerationwebui':'api_key_ooba',
+};
+
+function profileApiToSecretKey(apiName) {
+    if (!apiName) return null;
+    const lower = String(apiName).toLowerCase();
+    return PROFILE_API_TO_SECRET_KEY[lower] || `api_key_${lower}`;
+}
+
+async function getActiveSecretId(secretKey) {
+    try {
+        const res = await fetch('/api/secrets/read', { method: 'POST', headers: getRequestHeaders() });
+        if (!res.ok) return null;
+        const state = await res.json();
+        const arr = state?.[secretKey];
+        if (!Array.isArray(arr)) return null;
+        return arr.find(s => s?.active)?.id || null;
+    } catch {
+        return null;
+    }
+}
+
+async function rotateSecretServerOnly(secretKey, secretId) {
+    try {
+        const res = await fetch('/api/secrets/rotate', {
+            method:  'POST',
+            headers: getRequestHeaders(),
+            body:    JSON.stringify({ key: secretKey, id: secretId }),
+        });
+        return res.ok;
+    } catch {
+        return false;
+    }
+}
+
+function getConnectionProfile(profileName) {
+    if (!profileName) return null;
+    try {
+        const ctx = getContext();
+        const cm = ctx.extensionSettings?.connectionManager;
+        if (!cm?.profiles?.length) return null;
+        return cm.profiles.find(p => p.name === profileName) || null;
+    } catch {
+        return null;
+    }
+}
+
+function extractTextFromProfileResponse(resp) {
+    if (!resp) return null;
+    if (typeof resp === 'string') return resp;
+    if (Array.isArray(resp)) {
+        const texts = resp.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text);
+        if (texts.length) return texts.join('\n');
+    }
+    if (resp.content != null) {
+        if (typeof resp.content === 'string') return resp.content;
+        if (Array.isArray(resp.content)) {
+            const texts = resp.content.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text);
+            if (texts.length) return texts.join('\n');
+        }
+    }
+    if (resp.choices?.[0]?.message?.content) {
+        const c = resp.choices[0].message.content;
+        if (typeof c === 'string') return c;
+        if (Array.isArray(c)) {
+            const texts = c.filter(b => b?.type === 'text' && typeof b.text === 'string').map(b => b.text);
+            if (texts.length) return texts.join('\n');
+        }
+    }
+    if (typeof resp.text === 'string') return resp.text;
+    if (typeof resp.message === 'string') return resp.message;
+    if (resp.message?.content && typeof resp.message.content === 'string') return resp.message.content;
+    return null;
+}
+
+async function generateWithConnectionProfile(userMessage, max_tokens) {
+    const ctx = getContext();
+    if (!ctx.ConnectionManagerRequestService) {
+        throw new Error('ConnectionManagerRequestService is not available in this SillyTavern version');
+    }
+    const s = S();
+    const profile = getConnectionProfile(s.connectionProfile);
+    if (!profile) throw new Error(`Profile "${s.connectionProfile}" not found`);
+
+    const messages = [
+        { role: 'system', content: TRACKER_SYSTEM_PROMPT },
+        { role: 'user',   content: userMessage },
+    ];
+
+    // The Connection Manager doesn't apply a profile's saved secret-id by itself —
+    // the backend just reads whatever secret is currently "active" for that API type.
+    // So we briefly rotate the active secret to the one saved in the profile, then
+    // rotate back afterwards. This is a direct server call with no UI events, so it
+    // does NOT trigger a reconnect of your main ST API connection.
+    const profileSecretId = profile['secret-id'] || null;
+    const secretKey = profileApiToSecretKey(profile.api);
+    let previousSecretId = null;
+    let rotated = false;
+
+    if (profileSecretId && secretKey) {
+        try {
+            previousSecretId = await getActiveSecretId(secretKey);
+            if (previousSecretId !== profileSecretId) {
+                rotated = await rotateSecretServerOnly(secretKey, profileSecretId);
+                if (!rotated) console.warn('[enaennTracker]', `Could not activate profile's secret-id (${secretKey}). Using ST's currently active secret.`);
+            }
+        } catch (e) {
+            console.warn('[enaennTracker] secret swap error:', e);
+        }
+    }
+
+    try {
+        const response = await ctx.ConnectionManagerRequestService.sendRequest(
+            profile.id,
+            messages,
+            max_tokens,
+            { stream: false, extractData: true, includePreset: true, includeInstruct: true },
+        );
+        const text = extractTextFromProfileResponse(response);
+        if (text == null) throw new Error('Unexpected response format from API');
+        return text.trim();
+    } finally {
+        if (rotated && previousSecretId && secretKey) {
+            await rotateSecretServerOnly(secretKey, previousSecretId).catch(() => {});
+        }
+    }
+}
+
+function populateProfileDropdown() {
+    const select = document.getElementById('enaennTracker_profileSelect');
+    if (!select) return;
+    const s = S();
+    select.innerHTML = '<option value="">— Use active ST API —</option>';
+    try {
+        const ctx = getContext();
+        const profiles = ctx.extensionSettings?.connectionManager?.profiles || [];
+        profiles.forEach(p => {
+            if (!p?.name) return;
+            const opt = document.createElement('option');
+            opt.value = p.name;
+            opt.textContent = p.name;
+            if (s.connectionProfile === p.name) opt.selected = true;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.warn('[enaennTracker] Error loading profiles:', e);
+    }
+    updateProfileStatus();
+}
+
+function updateProfileStatus() {
+    const s = S();
+    const el = document.getElementById('enaennTracker_profileStatus');
+    if (!el) return;
+    if (!s.connectionProfile) {
+        el.innerHTML = '<span class="enaenn-status-inactive">No profile set — using ST\'s active API</span>';
+        return;
+    }
+    const profile = getConnectionProfile(s.connectionProfile);
+    if (!profile) {
+        el.innerHTML = `<span class="enaenn-status-warning">⚠️ Profile "${esc(s.connectionProfile)}" not found</span>`;
+        return;
+    }
+    const details = [profile.api, profile.model].filter(Boolean).join(' · ');
+    el.innerHTML = `<span class="enaenn-status-active">✓ <strong>${esc(profile.name)}</strong>${details ? ' — ' + esc(details) : ''}</span>`;
+}
+
+// ─── MAIN API DISPATCH (priority: Quick API → Connection Profile → ST main) ─
 
 async function callTrackerAPI(chatId) {
-    const ctx = getContext();
+    const s = S();
     const userMessage = buildTrackerPrompt(chatId);
 
     try {
+        // 1) Quick API override, if turned on and fully configured
+        if (s.quickApiEnabled && s.quickApiUrl && s.quickApiModel) {
+            return (await generateWithQuickApi(userMessage)) || null;
+        }
+        // 2) A specific Connection Manager profile, if selected
+        if (s.connectionProfile) {
+            return (await generateWithConnectionProfile(userMessage, 700)) || null;
+        }
+        // 3) Fallback: whatever main API is currently active in SillyTavern
+        const ctx = getContext();
         const rawResult = await ctx.generateRaw({
             prompt:       userMessage,
             systemPrompt: TRACKER_SYSTEM_PROMPT,
@@ -602,9 +900,74 @@ const SETTINGS_HTML = `
 
       <hr />
 
-      <div style="font-size:0.78em; opacity:0.6; margin-bottom:6px;">
-        The tracker uses whatever main API you currently have connected in SillyTavern — no separate setup needed.
-      </div>
+      <div class="enaenn-gap" style="font-weight:bold;">🔌 API Connection</div>
+      <small style="opacity:0.6;">Priority: Quick API → Connection Profile → SillyTavern's active API. Both the profile and Quick API send requests separately, without switching ST's active connection.</small>
+
+      <details class="enaenn-api-drawer">
+        <summary>🧩 SillyTavern Connection Profile</summary>
+        <div class="enaenn-api-drawer-body">
+          <small style="opacity:0.6;">Pick one of your saved SillyTavern connection profiles for the tracker to use. Leave empty to just use whatever API is currently active in ST.</small>
+          <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
+            <select id="enaennTracker_profileSelect" class="text_pole flex1">
+              <option value="">— Use active ST API —</option>
+            </select>
+            <button type="button" id="enaennTracker_profileRefresh" class="menu_button" title="Refresh profile list">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+          </div>
+          <div id="enaennTracker_profileStatus" class="enaenn-api-status">
+            <span class="enaenn-status-inactive">No profile set</span>
+          </div>
+          <div class="flex-container flexGap5 enaenn-gap">
+            <button type="button" id="enaennTracker_profileCheck" class="menu_button flex1"><i class="fa-solid fa-plug"></i> Check</button>
+            <button type="button" id="enaennTracker_profileTest" class="menu_button flex1"><i class="fa-solid fa-flask"></i> Test</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="enaenn-api-drawer">
+        <summary>⚡ Quick API (manual)</summary>
+        <div class="enaenn-api-drawer-body">
+          <label class="checkbox_label">
+            <input type="checkbox" id="enaennTracker_quickapiEnabled" />
+            <span>Enable Quick API override</span>
+          </label>
+          <div id="enaennTracker_quickapiOptions">
+            <div class="enaenn-gap">
+              <label style="display:block;">API URL (base):</label>
+              <input type="text" id="enaennTracker_quickapiUrl" class="text_pole" placeholder="https://your-server.com/v1" style="width:100%;" />
+            </div>
+            <div class="enaenn-gap">
+              <label style="display:block;">API Key:</label>
+              <input type="password" id="enaennTracker_quickapiKey" class="text_pole" placeholder="sk-... (optional)" style="width:100%;" />
+            </div>
+            <div class="enaenn-gap">
+              <label style="display:block;">Model — from list:</label>
+              <div class="flex-container flexGap5 alignItemsCenter">
+                <select id="enaennTracker_quickapiModelSelect" class="text_pole flex1">
+                  <option value="">— click ⟳ to load —</option>
+                </select>
+                <button type="button" id="enaennTracker_quickapiFetchModels" class="menu_button" title="Fetch model list from API">
+                  <i class="fa-solid fa-rotate"></i>
+                </button>
+              </div>
+              <small id="enaennTracker_modelsHint" style="display:none;"></small>
+            </div>
+            <div style="text-align:center; opacity:0.6; margin:4px 0;">— or —</div>
+            <div class="enaenn-gap">
+              <label style="display:block;">Model — manual:</label>
+              <input type="text" id="enaennTracker_quickapiModelInput" class="text_pole" placeholder="gpt-4o, claude-3-5-sonnet, ..." autocomplete="off" style="width:100%;" />
+            </div>
+            <div id="enaennTracker_quickapiStatus" class="enaenn-api-status">
+              <span class="enaenn-status-inactive">Quick API disabled</span>
+            </div>
+            <div class="flex-container flexGap5 enaenn-gap">
+              <button type="button" id="enaennTracker_quickapiConnect" class="menu_button flex1"><i class="fa-solid fa-plug"></i> Check</button>
+              <button type="button" id="enaennTracker_quickapiTest" class="menu_button flex1"><i class="fa-solid fa-flask"></i> Test</button>
+            </div>
+          </div>
+        </div>
+      </details>
 
       <hr />
 
@@ -633,6 +996,86 @@ function bindUI() {
     });
 
     $('#enaennTracker_toggleOverlayBtn').on('click', () => toggleOverlay());
+
+    // ─── Connection Profile bindings ───────────────────────────────────
+    $('#enaennTracker_profileSelect').on('change', function () {
+        save({ connectionProfile: this.value });
+        updateProfileStatus();
+    });
+    $('#enaennTracker_profileRefresh').on('click', () => populateProfileDropdown());
+    $('#enaennTracker_profileCheck').on('click', async function () {
+        const btn = this;
+        const orig = btn.innerHTML;
+        const s = S();
+        if (!s.connectionProfile) { toastr.warning('Select a profile first!'); return; }
+        const profile = getConnectionProfile(s.connectionProfile);
+        if (!profile) { toastr.warning('Profile not found. Click ⟳ to refresh the list.'); return; }
+        try {
+            const ctx = getContext();
+            if (!ctx.ConnectionManagerRequestService) { toastr.error('Connection Manager is not available in this ST.'); return; }
+            const supported = (ctx.ConnectionManagerRequestService.getSupportedProfiles?.() || []).some(p => p.id === profile.id);
+            if (!supported) { toastr.warning(`Profile "${profile.name}" isn't supported by Connection Manager (API type: ${profile.api || '—'}).`); return; }
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> OK';
+            setTimeout(() => { btn.innerHTML = orig; }, 1500);
+            toastr.success(`Profile "${profile.name}" (${profile.api || '—'} · ${profile.model || '—'}) looks good.`);
+        } catch (e) {
+            btn.innerHTML = orig;
+            toastr.error(`Check failed: ${e.message}`);
+        }
+    });
+    $('#enaennTracker_profileTest').on('click', async function () {
+        const btn = this;
+        const orig = btn.innerHTML;
+        const s = S();
+        if (!s.connectionProfile) { toastr.warning('Select a profile first!'); return; }
+        if (!getConnectionProfile(s.connectionProfile)) { toastr.warning('Profile not found. Click ⟳ to refresh.'); return; }
+        try {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Generating…';
+            const reply = await generateWithConnectionProfile('Reply with exactly one short line: "Tracker profile connected!" and nothing else.', 60);
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> OK';
+            setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2000);
+            toastr.success(`Reply: ${reply || '(empty)'}`);
+        } catch (e) {
+            btn.innerHTML = '<i class="fa-solid fa-xmark"></i> Error';
+            setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2500);
+            toastr.error(`Error: ${e.message}`);
+        }
+    });
+
+    // ─── Quick API bindings ────────────────────────────────────────────
+    $('#enaennTracker_quickapiEnabled').on('change', function () {
+        save({ quickApiEnabled: this.checked });
+        updateQuickApiStatus();
+    });
+    $('#enaennTracker_quickapiUrl').on('change', function () {
+        save({ quickApiUrl: this.value.trim() });
+        updateQuickApiStatus();
+    });
+    $('#enaennTracker_quickapiKey').on('change', function () {
+        save({ quickApiKey: this.value.trim() });
+    });
+    $('#enaennTracker_quickapiModelSelect').on('change', function () {
+        if (!this.value) return;
+        save({ quickApiModel: this.value });
+        $('#enaennTracker_quickapiModelInput').val('');
+        updateQuickApiStatus();
+    });
+    $('#enaennTracker_quickapiModelInput').on('input', function () {
+        const val = this.value.trim();
+        save({ quickApiModel: val });
+        if (val) $('#enaennTracker_quickapiModelSelect').val('');
+        updateQuickApiStatus();
+    });
+    $('#enaennTracker_quickapiFetchModels').on('click', () => fetchQuickApiModels());
+    $('#enaennTracker_quickapiConnect').on('click', () => connectQuickApi());
+    $('#enaennTracker_quickapiTest').on('click', async () => {
+        const s = S();
+        if (!s.quickApiEnabled) { toastr.warning('Enable Quick API first!'); return; }
+        if (!s.quickApiUrl || !s.quickApiModel) { toastr.warning('Enter both a URL and a model!'); return; }
+        toastr.info('Running a tracker update using Quick API…');
+        await updateTracker();
+    });
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
     $('#enaennTracker_regenBtn').on('click', async () => { await deleteLastTracker(); });
@@ -665,10 +1108,20 @@ jQuery(async () => {
     $('#enaennTracker_autoUpdate').prop('checked', S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
     $('#enaennTracker_windowSize').val(S().windowSize);
+    $('#enaennTracker_quickapiEnabled').prop('checked', S().quickApiEnabled);
+    $('#enaennTracker_quickapiUrl').val(S().quickApiUrl);
+    $('#enaennTracker_quickapiKey').val(S().quickApiKey);
+    $('#enaennTracker_quickapiModelInput').val(S().quickApiModel);
 
     $('#extensions_settings2').append(SETTINGS_HTML);
     bindUI();
     addToolbarButton();
+    updateQuickApiStatus();
+    populateProfileDropdown();
+    // Connection Manager's own settings may not be loaded yet on first paint —
+    // retry a couple of times shortly after startup.
+    setTimeout(populateProfileDropdown, 1000);
+    setTimeout(populateProfileDropdown, 3000);
 
     const chatId = getChatId();
     updateOverlayContent(chatId);
@@ -706,6 +1159,11 @@ jQuery(async () => {
         const chatId = getChatId();
         updateOverlayContent(chatId);
         if (S().overlayVisible) toggleOverlay(true);
+    });
+
+    // ─── Keep the profile dropdown in sync with ST's Connection Manager ──
+    eventSource.on(event_types.SETTINGS_LOADED, () => {
+        setTimeout(populateProfileDropdown, 500);
     });
 
     console.log('[enaennTracker] Loaded successfully (overlay mode).');
