@@ -449,10 +449,12 @@ function createOverlay() {
 }
 
 function toggleOverlay(show) {
-    overlayVisible = (show !== undefined) ? show : !overlayVisible;
     const overlay = document.getElementById('enaenn-overlay');
     if (!overlay) return;
+
+    overlayVisible = (show !== undefined) ? Boolean(show) : !overlayVisible;
     overlay.style.display = overlayVisible ? 'block' : 'none';
+
     S().overlayVisible = overlayVisible;
     save({ overlayVisible });
 }
@@ -1111,8 +1113,10 @@ jQuery(async () => {
     initSettings();
     createOverlay();
 
-    if (S().overlayVisible) toggleOverlay(true);
+    // 1. Append HTML FIRST so DOM elements exist before manipulation
+    $('#extensions_settings2').append(SETTINGS_HTML);
 
+    // 2. NOW populate form controls with saved settings
     $('#enaennTracker_enabled').prop('checked',   S().enabled);
     $('#enaennTracker_autoUpdate').prop('checked', S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
@@ -1122,11 +1126,12 @@ jQuery(async () => {
     $('#enaennTracker_quickapiKey').val(S().quickApiKey);
     $('#enaennTracker_quickapiModelInput').val(S().quickApiModel);
 
-    $('#extensions_settings2').append(SETTINGS_HTML);
+    // 3. Bind UI events & initialize profile list
     bindUI();
     addToolbarButton();
     updateQuickApiStatus();
     populateProfileDropdown();
+    
     // Connection Manager's own settings may not be loaded yet on first paint —
     // retry a couple of times shortly after startup.
     setTimeout(populateProfileDropdown, 1000);
@@ -1134,6 +1139,9 @@ jQuery(async () => {
 
     const chatId = getChatId();
     updateOverlayContent(chatId);
+
+    // 4. Force sync overlay visibility with settings state
+    toggleOverlay(S().overlayVisible);
 
     // ─── CONTEXT INJECTION ────────────────────────────────────────────────
     eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
