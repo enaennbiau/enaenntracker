@@ -18,28 +18,34 @@ import {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const MODULE_NAME  = 'enaennTracker';
-const TRACKER_FLAG = 'enaenn_tracker'; // legacy, kept for compatibility
+const TRACKER_FLAG = 'enaenn_tracker';
 
 const DEFAULT_SETTINGS = {
     enabled:            true,
     autoUpdate:         true,
     contextMessages:    20,
-    windowSize:         7,              // snapshots kept per chat
-    overlayVisible:     true,           // visible by default so new users actually see it
-    trackerStates:      {},             // { chatId: [ snapshot, ... ] }
+    windowSize:         7,
+    overlayVisible:     true,
+    trackerStates:      {},
 
-    // ─── API connection (three-tier, same priority as ST-Meddler) ─────────
-    // 1) Quick API (manual URL/key/model) if enabled
-    // 2) SillyTavern Connection Manager profile, if one is selected
-    // 3) Fallback: whatever main API is currently active in SillyTavern
-    connectionProfile:  '',             // name of a Connection Manager profile, or '' = use active ST API
+    // ─── Character & World Info ───────────────────────────────────────────
+    useCharDescription: true,          // inject character description into tracker prompt
+    useWorldInfo:       true,          // inject active WI entries into tracker prompt
+    wiTokenLimit:       8000,          // max tokens for WI block (0 = unlimited)
+
+    // ─── Last-generation stats (display only, not persisted across sessions) ─
+    lastGenTokensTotal: null,
+    lastGenTokensWI:    null,
+
+    // ─── API connection ───────────────────────────────────────────────────
+    connectionProfile:  '',
     quickApiEnabled:    false,
     quickApiUrl:        '',
     quickApiKey:        '',
     quickApiModel:      '',
 };
 
-// ─── TRACKER SYSTEM PROMPT (unchanged) ──────────────────────────────────────
+// ─── TRACKER SYSTEM PROMPT ───────────────────────────────────────────────────
 
 const TRACKER_SYSTEM_PROMPT = `You are a meticulous silent background tracker for a collaborative simulation. Your job: read the previous tracker state and recent chat, analyze the events, including elapsed in-simulation time, and output one updated tracker state block in plain-text format. Be precise about the calculations — think deeply and carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.
 
@@ -157,7 +163,7 @@ REL: Rune | 648 | Confused Fascination | + | 8 months | Enemies with Benefits �
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
-// ─── VITAL METADATA & HELPERS ──────────────────────────────────────────────
+// ─── VITAL METADATA & HELPERS ─────────────────────────────────────────────────
 
 const VITAL_META = [
     { key: 'satiation',   emoji: '🍴', label: 'Satiation',   text: 'food',    polarity: 'low'    },
@@ -181,7 +187,158 @@ function esc(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// ─── DATA PARSER ─────────────────────────────────────────────────────────────
+// ─── TOKEN ESTIMATION ─────────────────────────────────────────────────────────
+// Uses ST's tokenizer API if available, falls back to chars/4 approximation.
+// We use approximation for the WI budget check (fast, called per-entry) and
+// the tokenizer for the after-generation stats display (called once, async).
+
+function estimateTokensRough(text) {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+}
+
+async function estimateTokensAccurate(text) {
+    if (!text) return 0;
+    try {
+        const ctx = getContext();
+        // ST exposes a tokenizeText / getTokenCount helper depending on version
+        if (typeof ctx.getTokenCount === 'function') {
+            return await ctx.getTokenCount(text);
+        }
+        // Older ST versions expose it under a different name
+        if (typeof ctx.tokenizeText === 'function') {
+            const result = await ctx.tokenizeText(text);
+            return result?.count ?? estimateTokensRough(text);
+        }
+    } catch {
+        // fall through
+    }
+    return estimateTokensRough(text);
+}
+
+// ─── WORLD INFO CACHE ─────────────────────────────────────────────────────────
+// We hook into WORLDINFO_USED (fired during ST's own prompt assembly) and
+// cache the entries that ST decided were active. The tracker then reads this
+// cache at generation time.
+
+let _wiCache = [];          // array of { uid, key, content, order, position, depth }
+let _wiCacheTimestamp = 0;
+
+function onWorldInfoUsed(wiData) {
+    // ST fires this event with different shapes across versions.
+    // Normalise into a flat array of entry objects.
+    try {
+        let entries = [];
+
+        if (Array.isArray(wiData)) {
+            entries = wiData;
+        } else if (wiData && typeof wiData === 'object') {
+            // Some versions pass { worldInfoBefore, worldInfoAfter } or { entries }
+            if (Array.isArray(wiData.entries)) {
+                entries = wiData.entries;
+            } else if (Array.isArray(wiData.worldInfoBefore) || Array.isArray(wiData.worldInfoAfter)) {
+                entries = [
+                    ...(wiData.worldInfoBefore || []),
+                    ...(wiData.worldInfoAfter  || []),
+                ];
+            } else {
+                // Flat object keyed by uid
+                entries = Object.values(wiData);
+            }
+        }
+
+        // Normalise each entry to a consistent shape
+        _wiCache = entries
+            .filter(e => e && (e.content || e.text))
+            .map(e => ({
+                uid:      e.uid      ?? e.id    ?? '',
+                key:      Array.isArray(e.key) ? e.key.join(', ') : (e.key ?? ''),
+                content:  e.content  ?? e.text  ?? '',
+                order:    e.order    ?? e.insertion_order ?? 0,
+                position: e.position ?? 0,
+                depth:    e.depth    ?? e.scan_depth ?? 0,
+                priority: e.priority ?? e.order ?? 0,
+            }))
+            // Sort by priority descending so we include highest-priority entries first
+            // when the token budget forces us to truncate
+            .sort((a, b) => (b.priority - a.priority) || (b.order - a.order));
+
+        _wiCacheTimestamp = Date.now();
+    } catch (err) {
+        console.warn('[enaennTracker] Failed to parse WORLDINFO_USED payload:', err);
+    }
+}
+
+// ─── CHARACTER DESCRIPTION RETRIEVAL ─────────────────────────────────────────
+
+function getCharacterDescription() {
+    try {
+        const ctx = getContext();
+
+        // Group chat: use the character who sent the last message
+        if (ctx.groupId) {
+            // Find the last non-user message
+            for (let i = chat.length - 1; i >= 0; i--) {
+                const msg = chat[i];
+                if (!msg.is_user && msg.original_avatar) {
+                    // Try to find this character in the characters list
+                    const char = ctx.characters?.find(c => c.avatar === msg.original_avatar);
+                    if (char?.description) return char.description.trim();
+                    // Fallback: check name match
+                    const charByName = ctx.characters?.find(c => c.name === msg.name);
+                    if (charByName?.description) return charByName.description.trim();
+                }
+            }
+            return '';
+        }
+
+        // Solo chat: current character
+        const char = ctx.characters?.[ctx.characterId];
+        if (!char) return '';
+
+        // ST card v2/v3 stores description at data.description or top-level description
+        const desc = char.data?.description ?? char.description ?? '';
+        return desc.trim();
+    } catch (err) {
+        console.warn('[enaennTracker] Could not retrieve character description:', err);
+        return '';
+    }
+}
+
+// ─── WORLD INFO BLOCK BUILDER ─────────────────────────────────────────────────
+// Respects the token budget. Includes whole entries only (no mid-entry cuts).
+// Entries are already sorted by priority descending from onWorldInfoUsed().
+
+function buildWorldInfoBlock(tokenLimit) {
+    if (!_wiCache.length) return { text: '', tokenCount: 0, entryCount: 0, truncated: false };
+
+    const unlimited = !tokenLimit || tokenLimit <= 0;
+    const lines  = [];
+    let   usedTokens = 0;
+    let   truncated  = false;
+
+    for (const entry of _wiCache) {
+        if (!entry.content) continue;
+        const entryText = `[${entry.key || 'WI'}]: ${entry.content}`;
+        const entryTokens = estimateTokensRough(entryText);
+
+        if (!unlimited && usedTokens + entryTokens > tokenLimit) {
+            truncated = true;
+            continue; // skip this entry — adding it would exceed the budget
+        }
+
+        lines.push(entryText);
+        usedTokens += entryTokens;
+    }
+
+    const text = lines.length
+        ? `[WORLD INFO — active entries]\n${lines.join('\n')}\n[/WORLD INFO]`
+        : '';
+
+    return { text, tokenCount: usedTokens, entryCount: lines.length, truncated };
+}
+
+// ─── DATA PARSER ──────────────────────────────────────────────────────────────
 
 function parseTrackerData(text) {
     const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [] };
@@ -233,7 +390,7 @@ function parseTrackerData(text) {
     return data;
 }
 
-// ─── HTML BUILDER FOR TRACKER CARD ──────────────────────────────────────────
+// ─── HTML BUILDER FOR TRACKER CARD ───────────────────────────────────────────
 
 function buildVitalsHTML(vitals) {
     return VITAL_META.map(({ key, emoji, label, polarity }) => {
@@ -268,7 +425,7 @@ function buildTrackerHTML(data) {
     return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}</div><div class="enaenn-tabs-box"><input type="radio" name="enaenn-${uid}" id="enaenn-t1-${uid}" checked><input type="radio" name="enaenn-${uid}" id="enaenn-t2-${uid}"><input type="radio" name="enaenn-${uid}" id="enaenn-t3-${uid}"><div class="enaenn-tab-labels"><label for="enaenn-t1-${uid}">💖 Present</label><label for="enaenn-t2-${uid}">💕 Relations</label><label for="enaenn-t3-${uid}">🌍 Off‑screen</label></div><div class="enaenn-tab-content"><div class="enaenn-tp1">${tab1}</div><div class="enaenn-tp2"><div class="enaenn-rel-list">${tab2}</div></div><div class="enaenn-tp3">${tab3}</div></div></div>${plans}</div>`;
 }
 
-// ─── FORMAT TRACKER FOR CONTEXT (label vitals with words) ─────────────────
+// ─── FORMAT TRACKER FOR CONTEXT ───────────────────────────────────────────────
 
 function formatTrackerForContext(raw) {
     return raw.split('\n').map(line => {
@@ -301,7 +458,7 @@ function formatTrackerForContext(raw) {
     }).join('\n');
 }
 
-// ─── SETTINGS / STATE ────────────────────────────────────────────────────────
+// ─── SETTINGS / STATE ─────────────────────────────────────────────────────────
 
 function initSettings() {
     if (!extension_settings[MODULE_NAME]) {
@@ -321,7 +478,7 @@ const save = (patch = {}) => {
     saveSettingsDebounced();
 };
 
-// ─── PER‑CHAT SNAPSHOT STORAGE ──────────────────────────────────────────────
+// ─── PER-CHAT SNAPSHOT STORAGE ────────────────────────────────────────────────
 
 function getChatId() {
     try {
@@ -368,9 +525,34 @@ function restorePreviousSnapshot(chatId) {
     return restored;
 }
 
+// ─── LAST-GENERATION STATS ────────────────────────────────────────────────────
+
+function updateGenStats(totalTokens, wiTokens, wiTruncated) {
+    save({ lastGenTokensTotal: totalTokens, lastGenTokensWI: wiTokens });
+
+    const el = document.getElementById('enaennTracker_genStats');
+    if (!el) return;
+
+    if (totalTokens === null) {
+        el.textContent = '';
+        return;
+    }
+
+    const truncNote = wiTruncated ? ' (budget reached — some entries omitted)' : '';
+    el.textContent =
+        `Last generation: ~${totalTokens.toLocaleString()} tokens total` +
+        ` · ~${wiTokens.toLocaleString()} from World Info${truncNote}`;
+}
+
+function clearGenStats() {
+    save({ lastGenTokensTotal: null, lastGenTokensWI: null });
+    const el = document.getElementById('enaennTracker_genStats');
+    if (el) el.textContent = '';
+}
+
 // ─── OVERLAY CREATION ─────────────────────────────────────────────────────────
 
-let overlayVisible = false;
+let overlayVisible  = false;
 let overlayCollapsed = false;
 
 function createOverlay() {
@@ -390,30 +572,27 @@ function createOverlay() {
     `;
     document.body.appendChild(overlay);
 
-    // Drag logic
     let isDragging = false, startX, startY, origX, origY;
     const header = overlay.querySelector('#enaenn-overlay-header');
     const onDragStart = (e) => {
         if (e.target.closest('button')) return;
         isDragging = true;
-        const rect = overlay.getBoundingClientRect();
+        const rect  = overlay.getBoundingClientRect();
         const touch = e.touches ? e.touches[0] : e;
         startX = touch.clientX; startY = touch.clientY;
-        origX = rect.left; origY = rect.top;
+        origX  = rect.left;     origY  = rect.top;
         document.addEventListener('mousemove', onDragMove);
         document.addEventListener('touchmove', onDragMove, { passive: false });
-        document.addEventListener('mouseup', onDragEnd);
-        document.addEventListener('touchend', onDragEnd);
+        document.addEventListener('mouseup',   onDragEnd);
+        document.addEventListener('touchend',  onDragEnd);
         e.preventDefault();
     };
     const onDragMove = (e) => {
         if (!isDragging) return;
         const touch = e.touches ? e.touches[0] : e;
-        const dx = touch.clientX - startX;
-        const dy = touch.clientY - startY;
-        overlay.style.left = (origX + dx) + 'px';
-        overlay.style.top = (origY + dy) + 'px';
-        overlay.style.right = 'auto';
+        overlay.style.left   = (origX + touch.clientX - startX) + 'px';
+        overlay.style.top    = (origY + touch.clientY - startY) + 'px';
+        overlay.style.right  = 'auto';
         overlay.style.bottom = 'auto';
         e.preventDefault();
     };
@@ -421,13 +600,12 @@ function createOverlay() {
         isDragging = false;
         document.removeEventListener('mousemove', onDragMove);
         document.removeEventListener('touchmove', onDragMove);
-        document.removeEventListener('mouseup', onDragEnd);
-        document.removeEventListener('touchend', onDragEnd);
+        document.removeEventListener('mouseup',   onDragEnd);
+        document.removeEventListener('touchend',  onDragEnd);
     };
     header.addEventListener('mousedown', onDragStart);
     header.addEventListener('touchstart', onDragStart);
 
-    // Collapse toggle
     const collapseBtn = overlay.querySelector('#enaenn-overlay-collapse');
     collapseBtn.addEventListener('click', () => {
         overlayCollapsed = !overlayCollapsed;
@@ -435,13 +613,10 @@ function createOverlay() {
         collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
     });
 
-    // Close button
     overlay.querySelector('#enaenn-overlay-close').addEventListener('click', () => {
         toggleOverlay(false);
     });
 
-    // initial state — starts expanded; visibility is set right after creation by
-    // the init code, based on the saved (or default) overlayVisible setting.
     collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
     overlay.classList.toggle('collapsed', overlayCollapsed);
     overlay.style.display = 'none';
@@ -450,11 +625,8 @@ function createOverlay() {
 function toggleOverlay(show) {
     const overlay = document.getElementById('enaenn-overlay');
     if (!overlay) return;
-
     overlayVisible = (show !== undefined) ? Boolean(show) : !overlayVisible;
     overlay.style.display = overlayVisible ? 'block' : 'none';
-
-    S().overlayVisible = overlayVisible;
     save({ overlayVisible });
 }
 
@@ -462,15 +634,16 @@ function updateOverlayContent(chatId) {
     const overlay = document.getElementById('enaenn-overlay');
     if (!overlay) return;
     const body = overlay.querySelector('#enaenn-overlay-body');
-    const snap = getCurrentSnapshot(chatId);
-    if (snap) {
-        body.innerHTML = snap.html || '<div style="padding:8px;opacity:0.5;">No data</div>';
-    } else {
-        body.innerHTML = '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
-    }
+    const snap  = getCurrentSnapshot(chatId);
+    body.innerHTML = snap
+        ? (snap.html || '<div style="padding:8px;opacity:0.5;">No data</div>')
+        : '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
 }
 
-// ─── CONTEXT INJECTION ──────────────────────────────────────────────────────
+// ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
+// NOTE: Only the compact tracker state (LOC/AGENT/REL/etc.) is ever injected
+// into the main chat context. Character description and world info are sent
+// exclusively to the tracker's own API call and never reach the chat AI.
 
 function getInjectionText(chatId) {
     const snap = getCurrentSnapshot(chatId);
@@ -478,33 +651,74 @@ function getInjectionText(chatId) {
     return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
 }
 
-// ─── BUILD TRACKER PROMPT ────────────────────────────────────────────────────
+// ─── BUILD TRACKER PROMPT ─────────────────────────────────────────────────────
 
 function buildTrackerPrompt(chatId) {
+    const s = S();
+
+    // 1. Recent chat messages (already limited by contextMessages setting)
     const recentRoleplay = chat
         .filter(m => !m.extra?.[TRACKER_FLAG])
-        .slice(-(S().contextMessages || 20));
+        .slice(-(s.contextMessages || 20));
 
     const chatText = recentRoleplay
         .map(m => `${m.name || (m.is_user ? 'User' : 'Character')}: ${m.mes || ''}`)
         .join('\n\n');
 
-    const prevSnap = getCurrentSnapshot(chatId);
+    // 2. Previous tracker state
+    const prevSnap  = getCurrentSnapshot(chatId);
     const prevState = prevSnap
         ? `PREVIOUS TRACKER STATE (plain text — update from this):\n${prevSnap.raw}`
         : 'No previous tracker state. Initialize fresh from chat context.';
 
-    return (
-        `${prevState}\n\n---\n\n` +
+    // 3. Character description (bypasses token limit — always included if enabled)
+    let charBlock = '';
+    if (s.useCharDescription) {
+        const desc = getCharacterDescription();
+        if (desc) {
+            charBlock = `[CHARACTER DESCRIPTION]\n${desc}\n[/CHARACTER DESCRIPTION]\n\n`;
+        }
+    }
+
+    // 4. World Info block (token-limited)
+    let wiBlock      = '';
+    let wiTokenCount = 0;
+    let wiTruncated  = false;
+
+    if (s.useWorldInfo && _wiCache.length) {
+        const result = buildWorldInfoBlock(s.wiTokenLimit || 0);
+        wiBlock      = result.text ? result.text + '\n\n' : '';
+        wiTokenCount = result.tokenCount;
+        wiTruncated  = result.truncated;
+    }
+
+    // 5. Assemble in the agreed order:
+    //    [system prompt is passed separately]
+    //    char description → world info → chat history → previous state → instruction
+    const assembled =
+        charBlock +
+        wiBlock +
         `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
-        `Output the updated tracker data in the exact plain-text format specified. Nothing else.`
-    );
+        `${prevState}\n\n---\n\n` +
+        `Output the updated tracker data in the exact plain-text format specified. Nothing else.`;
+
+    // 6. Compute rough total token estimate for the stats display
+    //    (system prompt counted separately so the user sees the full picture)
+    const sysTokens   = estimateTokensRough(TRACKER_SYSTEM_PROMPT);
+    const bodyTokens  = estimateTokensRough(assembled);
+    const totalTokens = sysTokens + bodyTokens;
+
+    // Store for async accurate update after generation
+    _pendingGenStats = { totalTokens, wiTokenCount, wiTruncated };
+
+    return assembled;
 }
 
-// ─── QUICK API (manual URL / key / model — direct OpenAI-compatible POST) ──
-// This talks straight to whatever OpenAI-compatible endpoint you type in,
-// completely bypassing SillyTavern's own connection. Useful for pointing
-// the tracker at a different server/model than your main roleplay API.
+// Holds stats computed during buildTrackerPrompt so updateTracker() can
+// display them after the API call resolves.
+let _pendingGenStats = null;
+
+// ─── QUICK API ────────────────────────────────────────────────────────────────
 
 async function postQuickApi(messages, max_tokens) {
     const s = S();
@@ -513,9 +727,9 @@ async function postQuickApi(messages, max_tokens) {
     if (s.quickApiKey) headers['Authorization'] = `Bearer ${s.quickApiKey}`;
 
     const res = await fetch(`${base}/chat/completions`, {
-        method: 'POST',
+        method:  'POST',
         headers,
-        body: JSON.stringify({ model: s.quickApiModel, messages, max_tokens, temperature: 0.2 }),
+        body:    JSON.stringify({ model: s.quickApiModel, messages, max_tokens, temperature: 0.2 }),
     });
 
     if (!res.ok) {
@@ -536,7 +750,7 @@ async function generateWithQuickApi(userMessage) {
 }
 
 async function fetchQuickApiModels() {
-    const s = S();
+    const s      = S();
     const btn    = document.getElementById('enaennTracker_quickapiFetchModels');
     const hint   = document.getElementById('enaennTracker_modelsHint');
     const select = document.getElementById('enaennTracker_quickapiModelSelect');
@@ -554,15 +768,14 @@ async function fetchQuickApiModels() {
         if (s.quickApiKey) headers['Authorization'] = `Bearer ${s.quickApiKey}`;
         const res = await fetch(`${s.quickApiUrl.replace(/\/+$/, '')}/models`, { headers });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
+        const json   = await res.json();
         const models = (json.data || json.models || []).map(m => m.id || m).filter(Boolean).sort();
 
         if (select) {
             select.innerHTML = '<option value="">— select a model —</option>';
             models.forEach(id => {
                 const opt = document.createElement('option');
-                opt.value = id;
-                opt.textContent = id;
+                opt.value = id; opt.textContent = id;
                 if (s.quickApiModel === id) opt.selected = true;
                 select.appendChild(opt);
             });
@@ -576,7 +789,7 @@ async function fetchQuickApiModels() {
 }
 
 function updateQuickApiStatus() {
-    const s = S();
+    const s  = S();
     const el = document.getElementById('enaennTracker_quickapiStatus');
     if (!el) return;
     if (!s.quickApiEnabled) { el.innerHTML = '<span class="enaenn-status-inactive">Quick API disabled</span>'; return; }
@@ -591,7 +804,7 @@ async function connectQuickApi() {
     if (!s.quickApiUrl)     { toastr.warning('Enter the API URL!'); return; }
     if (!s.quickApiModel)   { toastr.warning('Enter a model name!'); return; }
 
-    const btn = document.getElementById('enaennTracker_quickapiConnect');
+    const btn  = document.getElementById('enaennTracker_quickapiConnect');
     const orig = btn?.innerHTML;
     try {
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Checking…'; }
@@ -607,16 +820,14 @@ async function connectQuickApi() {
     }
 }
 
-// ─── CONNECTION MANAGER PROFILE (ST's own saved profiles) ───────────────────
-// Sends a request through a specific SillyTavern Connection Manager profile
-// without touching/switching the profile that's actively selected in ST.
+// ─── CONNECTION MANAGER PROFILE ───────────────────────────────────────────────
 
 const PROFILE_API_TO_SECRET_KEY = {
-    'oai':               'api_key_openai',
-    'google':            'api_key_makersuite',
-    'openrouter-text':   'api_key_openrouter',
-    'kcpp':              'api_key_koboldcpp',
-    'oobabooga':         'api_key_ooba',
+    'oai':                'api_key_openai',
+    'google':             'api_key_makersuite',
+    'openrouter-text':    'api_key_openrouter',
+    'kcpp':               'api_key_koboldcpp',
+    'oobabooga':          'api_key_ooba',
     'textgenerationwebui':'api_key_ooba',
 };
 
@@ -631,12 +842,10 @@ async function getActiveSecretId(secretKey) {
         const res = await fetch('/api/secrets/read', { method: 'POST', headers: getRequestHeaders() });
         if (!res.ok) return null;
         const state = await res.json();
-        const arr = state?.[secretKey];
+        const arr   = state?.[secretKey];
         if (!Array.isArray(arr)) return null;
         return arr.find(s => s?.active)?.id || null;
-    } catch {
-        return null;
-    }
+    } catch { return null; }
 }
 
 async function rotateSecretServerOnly(secretKey, secretId) {
@@ -647,21 +856,17 @@ async function rotateSecretServerOnly(secretKey, secretId) {
             body:    JSON.stringify({ key: secretKey, id: secretId }),
         });
         return res.ok;
-    } catch {
-        return false;
-    }
+    } catch { return false; }
 }
 
 function getConnectionProfile(profileName) {
     if (!profileName) return null;
     try {
         const ctx = getContext();
-        const cm = ctx.extensionSettings?.connectionManager;
+        const cm  = ctx.extensionSettings?.connectionManager;
         if (!cm?.profiles?.length) return null;
         return cm.profiles.find(p => p.name === profileName) || null;
-    } catch {
-        return null;
-    }
+    } catch { return null; }
 }
 
 function extractTextFromProfileResponse(resp) {
@@ -686,7 +891,7 @@ function extractTextFromProfileResponse(resp) {
             if (texts.length) return texts.join('\n');
         }
     }
-    if (typeof resp.text === 'string') return resp.text;
+    if (typeof resp.text    === 'string') return resp.text;
     if (typeof resp.message === 'string') return resp.message;
     if (resp.message?.content && typeof resp.message.content === 'string') return resp.message.content;
     return null;
@@ -697,7 +902,7 @@ async function generateWithConnectionProfile(userMessage, max_tokens) {
     if (!ctx.ConnectionManagerRequestService) {
         throw new Error('ConnectionManagerRequestService is not available in this SillyTavern version');
     }
-    const s = S();
+    const s       = S();
     const profile = getConnectionProfile(s.connectionProfile);
     if (!profile) throw new Error(`Profile "${s.connectionProfile}" not found`);
 
@@ -706,26 +911,19 @@ async function generateWithConnectionProfile(userMessage, max_tokens) {
         { role: 'user',   content: userMessage },
     ];
 
-    // The Connection Manager doesn't apply a profile's saved secret-id by itself —
-    // the backend just reads whatever secret is currently "active" for that API type.
-    // So we briefly rotate the active secret to the one saved in the profile, then
-    // rotate back afterwards. This is a direct server call with no UI events, so it
-    // does NOT trigger a reconnect of your main ST API connection.
-    const profileSecretId = profile['secret-id'] || null;
-    const secretKey = profileApiToSecretKey(profile.api);
-    let previousSecretId = null;
-    let rotated = false;
+    const profileSecretId  = profile['secret-id'] || null;
+    const secretKey        = profileApiToSecretKey(profile.api);
+    let   previousSecretId = null;
+    let   rotated          = false;
 
     if (profileSecretId && secretKey) {
         try {
             previousSecretId = await getActiveSecretId(secretKey);
             if (previousSecretId !== profileSecretId) {
                 rotated = await rotateSecretServerOnly(secretKey, profileSecretId);
-                if (!rotated) console.warn('[enaennTracker]', `Could not activate profile's secret-id (${secretKey}). Using ST's currently active secret.`);
+                if (!rotated) console.warn('[enaennTracker] Could not activate profile secret-id.');
             }
-        } catch (e) {
-            console.warn('[enaennTracker] secret swap error:', e);
-        }
+        } catch (e) { console.warn('[enaennTracker] secret swap error:', e); }
     }
 
     try {
@@ -751,31 +949,28 @@ function populateProfileDropdown() {
     const s = S();
     select.innerHTML = '<option value="">— Use active ST API —</option>';
     try {
-        const ctx = getContext();
+        const ctx      = getContext();
         const profiles = ctx.extensionSettings?.connectionManager?.profiles || [];
         profiles.forEach(p => {
             if (!p?.name) return;
             const opt = document.createElement('option');
-            opt.value = p.name;
-            opt.textContent = p.name;
+            opt.value = p.name; opt.textContent = p.name;
             if (s.connectionProfile === p.name) opt.selected = true;
             select.appendChild(opt);
         });
-    } catch (e) {
-        console.warn('[enaennTracker] Error loading profiles:', e);
-    }
+    } catch (e) { console.warn('[enaennTracker] Error loading profiles:', e); }
     updateProfileStatus();
 }
 
 function updateProfileStatus() {
-    const s = S();
+    const s  = S();
     const el = document.getElementById('enaennTracker_profileStatus');
     if (!el) return;
     if (!s.connectionProfile) {
         el.innerHTML = '<span class="enaenn-status-inactive">No profile set — using ST\'s active API</span>';
         return;
     }
-    const profile = getConnectionProfile(s.connectionProfile);
+    const profile  = getConnectionProfile(s.connectionProfile);
     if (!profile) {
         el.innerHTML = `<span class="enaenn-status-warning">⚠️ Profile "${esc(s.connectionProfile)}" not found</span>`;
         return;
@@ -784,23 +979,20 @@ function updateProfileStatus() {
     el.innerHTML = `<span class="enaenn-status-active">✓ <strong>${esc(profile.name)}</strong>${details ? ' — ' + esc(details) : ''}</span>`;
 }
 
-// ─── MAIN API DISPATCH (priority: Quick API → Connection Profile → ST main) ─
+// ─── MAIN API DISPATCH ────────────────────────────────────────────────────────
 
 async function callTrackerAPI(chatId) {
-    const s = S();
+    const s           = S();
     const userMessage = buildTrackerPrompt(chatId);
 
     try {
-        // 1) Quick API override, if turned on and fully configured
         if (s.quickApiEnabled && s.quickApiUrl && s.quickApiModel) {
             return (await generateWithQuickApi(userMessage)) || null;
         }
-        // 2) A specific Connection Manager profile, if selected
         if (s.connectionProfile) {
             return (await generateWithConnectionProfile(userMessage, 700)) || null;
         }
-        // 3) Fallback: whatever main API is currently active in SillyTavern
-        const ctx = getContext();
+        const ctx       = getContext();
         const rawResult = await ctx.generateRaw({
             prompt:       userMessage,
             systemPrompt: TRACKER_SYSTEM_PROMPT,
@@ -813,37 +1005,59 @@ async function callTrackerAPI(chatId) {
     }
 }
 
-// ─── MAIN UPDATE FLOW ────────────────────────────────────────────────────────
+// ─── MAIN UPDATE FLOW ─────────────────────────────────────────────────────────
 
 let _updating = false;
 
 async function updateTracker() {
-    if (_updating) return;
-    if (!S().enabled) return;
-    const chatId = getChatId();
+    if (_updating)     return;
+    if (!S().enabled)  return;
 
+    const chatId = getChatId();
     _updating = true;
     setLoadingState(true);
+    _pendingGenStats = null;
 
     const rawResult = await callTrackerAPI(chatId);
 
     setLoadingState(false);
     _updating = false;
 
-    if (!rawResult) return;
+    if (!rawResult) {
+        // Still update stats display even on failure (shows last attempt)
+        if (_pendingGenStats) {
+            updateGenStats(
+                _pendingGenStats.totalTokens,
+                _pendingGenStats.wiTokenCount,
+                _pendingGenStats.wiTruncated,
+            );
+        }
+        return;
+    }
 
-    const parsed = parseTrackerData(rawResult);
+    const parsed  = parseTrackerData(rawResult);
     const labeled = formatTrackerForContext(rawResult);
-    const html = buildTrackerHTML(parsed);
+    const html    = buildTrackerHTML(parsed);
 
     saveSnapshot(chatId, rawResult, labeled, html, parsed);
+
+    // Update stats display
+    if (_pendingGenStats) {
+        updateGenStats(
+            _pendingGenStats.totalTokens,
+            _pendingGenStats.wiTokenCount,
+            _pendingGenStats.wiTruncated,
+        );
+        _pendingGenStats = null;
+    }
+
     toastr.success('Tracker updated!', '', { timeOut: 1500 });
 }
 
-// ─── DELETE / RESTORE ────────────────────────────────────────────────────────
+// ─── DELETE / RESTORE ─────────────────────────────────────────────────────────
 
 async function deleteLastTracker() {
-    const chatId = getChatId();
+    const chatId   = getChatId();
     const restored = restorePreviousSnapshot(chatId);
     if (!restored) {
         toastr.info('No previous snapshot to restore to.');
@@ -853,7 +1067,7 @@ async function deleteLastTracker() {
     return !!restored;
 }
 
-// ─── UI HELPERS ──────────────────────────────────────────────────────────────
+// ─── UI HELPERS ───────────────────────────────────────────────────────────────
 
 function setLoadingState(loading) {
     $('#enaennTracker_refreshBtn')
@@ -867,7 +1081,7 @@ function setLoadingState(loading) {
         .text(loading ? '⏳' : '📊');
 }
 
-// ─── SETTINGS UI ─────────────────────────────────────────────────────────────
+// ─── SETTINGS UI ──────────────────────────────────────────────────────────────
 
 const SETTINGS_HTML = `
 <div id="enaennTracker_root" class="extension_settings">
@@ -891,7 +1105,7 @@ const SETTINGS_HTML = `
       </div>
 
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
-        <label style="white-space:nowrap; min-width:175px;">Roleplay messages → tracker API:</label>
+        <label style="white-space:nowrap; min-width:175px;">Roleplay messages sent to tracker:</label>
         <input type="number" id="enaennTracker_ctxSize" min="5" max="100" class="text_pole" style="width:60px;" />
       </div>
 
@@ -902,13 +1116,46 @@ const SETTINGS_HTML = `
 
       <hr />
 
+      <div class="enaenn-gap" style="font-weight:bold;">📖 Context Sources</div>
+      <small style="opacity:0.6;">These are sent only to the tracker API — never to the main chat AI.</small>
+
+      <div class="flex-container flexGap5 enaenn-gap" style="margin-top:6px;">
+        <label class="checkbox_label">
+          <input type="checkbox" id="enaennTracker_useCharDesc" />
+          <span>Include character description</span>
+        </label>
+      </div>
+
+      <div class="flex-container flexGap5 enaenn-gap">
+        <label class="checkbox_label">
+          <input type="checkbox" id="enaennTracker_useWI" />
+          <span>Include active World Info entries</span>
+        </label>
+      </div>
+
+      <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
+        <label style="white-space:nowrap; min-width:175px;">World Info token budget:</label>
+        <input type="number" id="enaennTracker_wiTokenLimit" min="0" max="200000" class="text_pole" style="width:90px;" />
+        <small style="opacity:0.6;">tokens (0 = unlimited)</small>
+      </div>
+
+      <small style="opacity:0.5; display:block; margin-top:2px;">
+        ⚠️ Keep the WI budget well within your model's actual context window.
+        The tracker also receives the system prompt, character description, chat history, and previous state —
+        none of which count against this budget.
+      </small>
+
+      <div id="enaennTracker_genStats" class="enaenn-gen-stats"></div>
+
+      <hr />
+
       <div class="enaenn-gap" style="font-weight:bold;">🔌 API Connection</div>
-      <small style="opacity:0.6;">Priority: Quick API → Connection Profile → SillyTavern's active API. Both the profile and Quick API send requests separately, without switching ST's active connection.</small>
+      <small style="opacity:0.6;">Priority: Quick API → Connection Profile → SillyTavern's active API.</small>
 
       <details class="enaenn-api-drawer">
         <summary>🧩 SillyTavern Connection Profile</summary>
         <div class="enaenn-api-drawer-body">
-          <small style="opacity:0.6;">Pick one of your saved SillyTavern connection profiles for the tracker to use. Leave empty to just use whatever API is currently active in ST.</small>
+          <small style="opacity:0.6;">Pick one of your saved SillyTavern connection profiles for the tracker to use. Leave empty to use whatever API is currently active in ST.</small>
           <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
             <select id="enaennTracker_profileSelect" class="text_pole flex1">
               <option value="">— Use active ST API —</option>
@@ -922,7 +1169,7 @@ const SETTINGS_HTML = `
           </div>
           <div class="flex-container flexGap5 enaenn-gap">
             <button type="button" id="enaennTracker_profileCheck" class="menu_button flex1"><i class="fa-solid fa-plug"></i> Check</button>
-            <button type="button" id="enaennTracker_profileTest" class="menu_button flex1"><i class="fa-solid fa-flask"></i> Test</button>
+            <button type="button" id="enaennTracker_profileTest"  class="menu_button flex1"><i class="fa-solid fa-flask"></i> Test</button>
           </div>
         </div>
       </details>
@@ -965,7 +1212,7 @@ const SETTINGS_HTML = `
             </div>
             <div class="flex-container flexGap5 enaenn-gap">
               <button type="button" id="enaennTracker_quickapiConnect" class="menu_button flex1"><i class="fa-solid fa-plug"></i> Check</button>
-              <button type="button" id="enaennTracker_quickapiTest" class="menu_button flex1"><i class="fa-solid fa-flask"></i> Test</button>
+              <button type="button" id="enaennTracker_quickapiTest"    class="menu_button flex1"><i class="fa-solid fa-flask"></i> Test</button>
             </div>
           </div>
         </div>
@@ -974,16 +1221,16 @@ const SETTINGS_HTML = `
       <hr />
 
       <div class="flex-container flexGap5">
-        <button id="enaennTracker_refreshBtn"    class="menu_button flex1">🔄 Refresh Tracker</button>
-        <button id="enaennTracker_regenBtn"      class="menu_button flex1" title="Undo the last tracker update (restore previous snapshot).">♻️ Restore Previous</button>
-        <button id="enaennTracker_clearBtn"      class="menu_button" title="Clear all snapshots for this chat.">🗑️ Clear State</button>
+        <button id="enaennTracker_refreshBtn" class="menu_button flex1">🔄 Refresh Tracker</button>
+        <button id="enaennTracker_regenBtn"   class="menu_button flex1" title="Undo the last tracker update (restore previous snapshot).">♻️ Restore Previous</button>
+        <button id="enaennTracker_clearBtn"   class="menu_button" title="Clear all snapshots for this chat.">🗑️ Clear State</button>
       </div>
 
     </div>
   </div>
 </div>`;
 
-// ─── BIND UI ─────────────────────────────────────────────────────────────────
+// ─── BIND UI ──────────────────────────────────────────────────────────────────
 
 function bindUI() {
     $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
@@ -993,42 +1240,51 @@ function bindUI() {
         const v = Math.max(1, parseInt(this.value) || 7);
         save({ windowSize: v });
         const chatId = getChatId();
-        const snaps = getSnapshots(chatId);
+        const snaps  = getSnapshots(chatId);
         if (snaps.length > v) setSnapshots(chatId, snaps.slice(-v));
+    });
+
+    // Context sources
+    $('#enaennTracker_useCharDesc').on('change', function () { save({ useCharDescription: this.checked }); });
+    $('#enaennTracker_useWI').on('change',       function () { save({ useWorldInfo:       this.checked }); });
+    $('#enaennTracker_wiTokenLimit').on('change', function () {
+        const v = Math.max(0, parseInt(this.value) || 0);
+        save({ wiTokenLimit: v });
+        $(this).val(v);
     });
 
     $('#enaennTracker_toggleOverlayBtn').on('click', () => toggleOverlay());
 
-    // ─── Connection Profile bindings ───────────────────────────────────
+    // Connection Profile
     $('#enaennTracker_profileSelect').on('change', function () {
         save({ connectionProfile: this.value });
         updateProfileStatus();
     });
     $('#enaennTracker_profileRefresh').on('click', () => populateProfileDropdown());
     $('#enaennTracker_profileCheck').on('click', async function () {
-        const btn = this;
+        const btn  = this;
         const orig = btn.innerHTML;
-        const s = S();
+        const s    = S();
         if (!s.connectionProfile) { toastr.warning('Select a profile first!'); return; }
         const profile = getConnectionProfile(s.connectionProfile);
-        if (!profile) { toastr.warning('Profile not found. Click ⟳ to refresh the list.'); return; }
+        if (!profile)  { toastr.warning('Profile not found. Click ⟳ to refresh the list.'); return; }
         try {
             const ctx = getContext();
             if (!ctx.ConnectionManagerRequestService) { toastr.error('Connection Manager is not available in this ST.'); return; }
             const supported = (ctx.ConnectionManagerRequestService.getSupportedProfiles?.() || []).some(p => p.id === profile.id);
-            if (!supported) { toastr.warning(`Profile "${profile.name}" isn't supported by Connection Manager (API type: ${profile.api || '—'}).`); return; }
+            if (!supported) { toastr.warning(`Profile "${profile.name}" isn't supported (API type: ${profile.api || '—'}).`); return; }
             btn.innerHTML = '<i class="fa-solid fa-check"></i> OK';
-            setTimeout(() => { btn.innerHTML = orig; }, 1500);
-            toastr.success(`Profile "${profile.name}" (${profile.api || '—'} · ${profile.model || '—'}) looks good.`);
+            setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 1500);
+            toastr.success(`Profile "${profile.name}" looks good.`);
         } catch (e) {
             btn.innerHTML = orig;
             toastr.error(`Check failed: ${e.message}`);
         }
     });
     $('#enaennTracker_profileTest').on('click', async function () {
-        const btn = this;
+        const btn  = this;
         const orig = btn.innerHTML;
-        const s = S();
+        const s    = S();
         if (!s.connectionProfile) { toastr.warning('Select a profile first!'); return; }
         if (!getConnectionProfile(s.connectionProfile)) { toastr.warning('Profile not found. Click ⟳ to refresh.'); return; }
         try {
@@ -1045,7 +1301,7 @@ function bindUI() {
         }
     });
 
-    // ─── Quick API bindings ────────────────────────────────────────────
+    // Quick API
     $('#enaennTracker_quickapiEnabled').on('change', function () {
         save({ quickApiEnabled: this.checked });
         updateQuickApiStatus();
@@ -1070,89 +1326,102 @@ function bindUI() {
         updateQuickApiStatus();
     });
     $('#enaennTracker_quickapiFetchModels').on('click', () => fetchQuickApiModels());
-    $('#enaennTracker_quickapiConnect').on('click', () => connectQuickApi());
+    $('#enaennTracker_quickapiConnect').on('click',     () => connectQuickApi());
     $('#enaennTracker_quickapiTest').on('click', async () => {
         const s = S();
-        if (!s.quickApiEnabled) { toastr.warning('Enable Quick API first!'); return; }
+        if (!s.quickApiEnabled)              { toastr.warning('Enable Quick API first!'); return; }
         if (!s.quickApiUrl || !s.quickApiModel) { toastr.warning('Enter both a URL and a model!'); return; }
         toastr.info('Running a tracker update using Quick API…');
         await updateTracker();
     });
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
-    $('#enaennTracker_regenBtn').on('click', async () => { await deleteLastTracker(); });
+    $('#enaennTracker_regenBtn').on('click',   async () => { await deleteLastTracker(); });
     $('#enaennTracker_clearBtn').on('click', () => {
         const chatId = getChatId();
         setSnapshots(chatId, []);
         updateOverlayContent(chatId);
+        clearGenStats();
         toastr.info('Tracker state cleared for this chat.');
     });
 }
 
-// ─── TOOLBAR BUTTON ──────────────────────────────────────────────────────────
+// ─── TOOLBAR BUTTON ───────────────────────────────────────────────────────────
 
 function addToolbarButton() {
     if ($('#enaennTracker_toolbarBtn').length) return;
     const $btn = $(`<div id="enaennTracker_toolbarBtn" title="Toggle enaennTracker overlay" class="interactable">📊</div>`);
     $btn.on('click', () => toggleOverlay());
-
-    // '#send_but_sheld' is the usual spot, but ST versions/themes can differ —
-    // fall back to a couple of other known containers before giving up.
     const targets = ['#send_but_sheld', '#rightSendForm', '#form_sheld'];
     for (const sel of targets) {
         const $target = $(sel);
         if ($target.length) { $target.prepend($btn); return; }
     }
-    console.warn('[enaennTracker] Could not find a toolbar container to add the 📊 button to. Use the "Show/Hide Overlay" button in the extension settings instead.');
+    console.warn('[enaennTracker] Could not find toolbar container for 📊 button.');
 }
 
-// ─── INIT ────────────────────────────────────────────────────────────────────
+// ─── INIT ─────────────────────────────────────────────────────────────────────
 
 jQuery(async () => {
     initSettings();
     createOverlay();
 
-    // 1. Append HTML FIRST so DOM elements exist before manipulation
     $('#extensions_settings2').append(SETTINGS_HTML);
 
-    // 2. NOW populate form controls with saved settings
-    $('#enaennTracker_enabled').prop('checked',   S().enabled);
-    $('#enaennTracker_autoUpdate').prop('checked', S().autoUpdate);
+    // Restore saved values into form controls
+    $('#enaennTracker_enabled').prop('checked',      S().enabled);
+    $('#enaennTracker_autoUpdate').prop('checked',   S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
     $('#enaennTracker_windowSize').val(S().windowSize);
+    $('#enaennTracker_useCharDesc').prop('checked',  S().useCharDescription);
+    $('#enaennTracker_useWI').prop('checked',        S().useWorldInfo);
+    $('#enaennTracker_wiTokenLimit').val(S().wiTokenLimit);
     $('#enaennTracker_quickapiEnabled').prop('checked', S().quickApiEnabled);
     $('#enaennTracker_quickapiUrl').val(S().quickApiUrl);
     $('#enaennTracker_quickapiKey').val(S().quickApiKey);
     $('#enaennTracker_quickapiModelInput').val(S().quickApiModel);
 
-    // 3. Bind UI events & initialize profile list
     bindUI();
     addToolbarButton();
     updateQuickApiStatus();
     populateProfileDropdown();
-    
-    // Connection Manager's own settings may not be loaded yet on first paint —
-    // retry a couple of times shortly after startup.
     setTimeout(populateProfileDropdown, 1000);
     setTimeout(populateProfileDropdown, 3000);
 
     const chatId = getChatId();
     updateOverlayContent(chatId);
-
-    // 4. Force sync overlay visibility with settings state
     toggleOverlay(S().overlayVisible);
 
-    // ─── CONTEXT INJECTION ────────────────────────────────────────────────
+    // Restore last-gen stats if we have them (they don't survive page reload
+    // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
+    if (S().lastGenTokensTotal !== null) {
+        updateGenStats(S().lastGenTokensTotal, S().lastGenTokensWI ?? 0, false);
+    }
+
+    // ─── World Info cache hook ─────────────────────────────────────────────
+    // ST fires WORLDINFO_USED during its own prompt assembly (i.e. when the
+    // chat AI is about to generate). We cache the active entries here so the
+    // tracker can use them at the next generation without re-scanning itself.
+    if (event_types.WORLDINFO_USED) {
+        eventSource.on(event_types.WORLDINFO_USED, onWorldInfoUsed);
+    } else {
+        // Older ST versions used a different event name
+        const fallback = 'worldinfo_used';
+        eventSource.on(fallback, onWorldInfoUsed);
+        console.warn('[enaennTracker] event_types.WORLDINFO_USED not found — using fallback event name "worldinfo_used"');
+    }
+
+    // ─── Context injection (tracker state → main chat AI only) ────────────
     eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
         if (!S().enabled) return;
-        const chatId = getChatId();
+        const chatId    = getChatId();
         const injection = getInjectionText(chatId);
         if (!injection) return;
 
         if (args && typeof args === 'object') {
             if (args.prompt !== undefined) {
                 args.prompt += injection;
-            } else if (args.messages !== undefined && Array.isArray(args.messages)) {
+            } else if (Array.isArray(args.messages)) {
                 let insertIdx = args.messages.length;
                 for (let i = args.messages.length - 1; i >= 0; i--) {
                     if (args.messages[i].role === 'user') { insertIdx = i; break; }
@@ -1162,25 +1431,30 @@ jQuery(async () => {
         }
     });
 
-    // ─── AUTO‑UPDATE AFTER REPLY ──────────────────────────────────────────
+    // ─── Auto-update after each reply ─────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (S().enabled && S().autoUpdate) {
+            // Small delay so the WI cache has time to be populated by
+            // WORLDINFO_USED (which fires slightly before MESSAGE_RECEIVED)
             await new Promise(r => setTimeout(r, 700));
             await updateTracker();
         }
     });
 
-    // ─── CHAT CHANGED: reset display, but don't auto‑generate ────────────
+    // ─── Chat changed ──────────────────────────────────────────────────────
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         const chatId = getChatId();
         updateOverlayContent(chatId);
+        clearGenStats();
+        _wiCache = [];              // stale WI entries from previous chat are meaningless
+        _wiCacheTimestamp = 0;
         if (S().overlayVisible) toggleOverlay(true);
     });
 
-    // ─── Keep the profile dropdown in sync with ST's Connection Manager ──
+    // ─── Keep profile dropdown in sync ─────────────────────────────────────
     eventSource.on(event_types.SETTINGS_LOADED, () => {
         setTimeout(populateProfileDropdown, 500);
     });
 
-    console.log('[enaennTracker] Loaded successfully (overlay mode).');
+    console.log('[enaennTracker] Loaded successfully.');
 });
