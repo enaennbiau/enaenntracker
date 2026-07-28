@@ -1183,6 +1183,7 @@ const SETTINGS_HTML = `
           <span>Auto-update after each reply</span>
         </label>
         <button id="enaennTracker_toggleOverlayBtn" class="menu_button">👁️ Show/Hide Overlay</button>
+        <button id="enaennTracker_recenterBtn" class="menu_button" title="Reset overlay to center of screen">🎯 Recenter Overlay</button>
       </div>
 
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
@@ -1335,6 +1336,12 @@ function bindUI() {
         const v = Math.max(200, parseInt(this.value) || 1500);
         save({ trackerMaxTokens: v });
         $(this).val(v);
+    });
+
+    $('#enaennTracker_recenterBtn').on('click', () => {
+    save({ overlayPosPct: null });
+    positionOverlaySafely();
+    toastr.info('Overlay recentered.');
     });
 
     // Context sources
