@@ -7,8 +7,9 @@ import {
     event_types,
     saveSettingsDebounced,
     chat,
-    addOneMessage,
     getRequestHeaders,
+    settings,            // ← for reading main API profiles
+    currentChatId,       // ← for per‑chat storage
 } from '../../../../script.js';
 
 import {
@@ -18,19 +19,19 @@ import {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const MODULE_NAME  = 'enaennTracker';
-const TRACKER_FLAG = 'enaenn_tracker';
+const TRACKER_FLAG = 'enaenn_tracker'; // kept for legacy, not used for new messages
 
 const DEFAULT_SETTINGS = {
     enabled:            true,
     autoUpdate:         true,
-    profiles:           [],
-    activeProfileIndex: -1,
-    lastTracker:        '',
     contextMessages:    20,
-    windowSize:         7,
+    windowSize:         7,             // number of snapshots kept per chat
+    selectedProfile:    'same',        // 'same' or profile name
+    overlayVisible:     false,         // start hidden
+    trackerStates:      {},            // { chatId: [ snapshot, ... ] }
 };
 
-// ─── TRACKER SYSTEM PROMPT ────────────────────────────────────────────────────
+// ─── TRACKER SYSTEM PROMPT (unchanged) ──────────────────────────────────────
 
 const TRACKER_SYSTEM_PROMPT = `You are a meticulous silent background tracker for a collaborative simulation. Your job: read the previous tracker state and recent chat, analyze the events, including elapsed in-simulation time, and output one updated tracker state block in plain-text format. Be precise about the calculations — think deeply and carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.
 
@@ -149,7 +150,7 @@ REL: Clara | 295 | Interested Amiability | + | 8 months | Acquaintances | 😊 |
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
-// ─── VITAL METADATA & COLOR LOGIC ────────────────────────────────────────────
+// ─── VITAL METADATA & HELPERS (unchanged) ──────────────────────────────────
 
 const VITAL_META = [
     { key: 'satiation',   emoji: '🍴', label: 'Satiation',   text: 'food',    polarity: 'low'    },
@@ -161,70 +162,9 @@ const VITAL_META = [
     { key: 'stress',      emoji: '🧠', label: 'Stress',      text: 'stress',  polarity: 'high'   },
 ];
 
-// Strip any non-numeric prefix (word labels, emoji) so parseFloat works on
-// both raw ("76") and labeled ("food:76" or "🍴76") vital strings.
 const numVal = (s) => parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')) || 0;
 
-// ─── TRACKER CONTEXT FORMATTER ───────────────────────────────────────────────
-// Transforms the raw tracker output (LOC/AGENT/REL pipe format) into a labeled,
-// human-readable format stored in `mes` so the main model understands each field.
-//
-//  AGENT vitals:  76 | 83 | …  →  food:76 | energy:83 | hygiene:90 | …
-//  AGENT deltas: -2 | -2 | …   →  Δfood:-2 | Δenergy:-2 | …
-//  REL:           →  RELATIONSHIP:
-//  OFFSCREEN vitals: fine | rested | …  →  food:fine | energy:rested | hygiene:fresh | …
-//
-// The SillyTavern find-regex is updated to match this labeled format and still
-// renders the same emoji-illustrated HTML card.
-//
-// OFFSCREEN vital order differs from AGENT (bladder/thirst are swapped):
-const OFFSCREEN_VITAL_TEXTS = ['food', 'energy', 'hygiene', 'bladder', 'thirst', 'arousal', 'stress'];
-
-function formatTrackerForContext(raw) {
-    return raw.split('\n').map(line => {
-        const t = line.trim();
-        if (!t) return line;
-
-        if (t.startsWith('AGENT:')) {
-            const parts = t.slice('AGENT:'.length).split('|').map(s => s.trim());
-            if (parts.length < 19) return line;
-            const vt = VITAL_META.map(m => m.text); // food, energy, hygiene, thirst, bladder, arousal, stress
-            for (let i = 0; i < 7; i++) {
-                // Strip any existing emoji prefix (from a previous labeling pass) before re-labeling
-                const rawVal = parts[3 + i].replace(/^[^\d-+.]+/, '');
-                const rawDel = parts[10 + i].replace(/^Δ\w+:/, '');
-                parts[3 + i]  = `${vt[i]}:${rawVal}`;
-                parts[10 + i] = `Δ${vt[i]}:${rawDel}`;
-            }
-            return 'AGENT: ' + parts.join(' | ');
-        }
-
-        if (t.startsWith('REL:')) {
-            return 'RELATIONSHIP:' + t.slice('REL:'.length);
-        }
-
-        if (t.startsWith('OFFSCREEN:')) {
-            const parts = t.slice('OFFSCREEN:'.length).split('|').map(s => s.trim());
-            if (parts.length < 12) return line;
-            // Fields 4–10 are descriptive vital words (fine, rested, fresh…)
-            for (let i = 0; i < 7; i++) {
-                const rawVal = parts[4 + i].replace(/^\w+:/, ''); // strip existing label if any
-                parts[4 + i] = `${OFFSCREEN_VITAL_TEXTS[i]}:${rawVal}`;
-            }
-            return 'OFFSCREEN: ' + parts.join(' | ');
-        }
-
-        return line;
-    }).join('\n');
-}
-
-function vitalColorClass(polarity, value) {
-    if (polarity === 'arousal') return 'enaenn-fill-arousal';
-    if (polarity === 'low')     return value >= 50 ? 'enaenn-fill-ok' : value >= 25 ? 'enaenn-fill-warn' : 'enaenn-fill-crit';
-    return value <= 50 ? 'enaenn-fill-ok' : value <= 74 ? 'enaenn-fill-warn' : 'enaenn-fill-crit';
-}
-
-// ─── DATA PARSER ──────────────────────────────────────────────────────────────
+// ─── DATA PARSER (unchanged) ────────────────────────────────────────────────
 
 function parseTrackerData(text) {
     const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [] };
@@ -276,7 +216,7 @@ function parseTrackerData(text) {
     return data;
 }
 
-// ─── HTML BUILDERS (used for restore/re-render; regex handles new messages) ───
+// ─── HTML BUILDERS (for the overlay) ─────────────────────────────────────────
 
 function esc(str) {
     return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -285,39 +225,39 @@ function esc(str) {
 function buildVitalsHTML(vitals) {
     return VITAL_META.map(({ key, emoji, label, polarity }) => {
         const v = vitals[key] || { val: 0, delta: '—' };
-        const colorCls = vitalColorClass(polarity, v.val);
+        const colorCls = polarity === 'arousal' ? 'enaenn-fill-arousal'
+            : polarity === 'low' ? (v.val >= 50 ? 'enaenn-fill-ok' : v.val >= 25 ? 'enaenn-fill-warn' : 'enaenn-fill-crit')
+            : (v.val <= 50 ? 'enaenn-fill-ok' : v.val <= 74 ? 'enaenn-fill-warn' : 'enaenn-fill-crit');
         const barWidth = polarity === 'arousal' ? Math.min(v.val, 100) : v.val;
         return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${emoji}</span><span class="enaenn-vital-label">${label}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${v.val}%</span><span class="enaenn-vital-delta">(${esc(v.delta)})</span></div>`;
     }).join('\n');
 }
 
-function buildAgentRowHTML(agent) {
-    const cond = agent.condition ? `<div class="enaenn-condition">🩹 ${esc(agent.condition)}</div>` : '';
-    return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(agent.gender)} ${esc(agent.name)}</span><span class="enaenn-agent-attire">👗 ${esc(agent.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(agent.vitals)}</div></details>${cond}<div class="enaenn-impulse">🎯 ${esc(agent.impulse)}</div></div>`;
-}
-
-function buildRelFoldHTML(rel) {
-    const barClass = rel.valence === '-' ? 'enaenn-rel-fill-neg' : 'enaenn-rel-fill';
-    const barWidth = Math.min((rel.mainVal / 1000) * 100, 100).toFixed(1);
-    const itmHTML  = rel.itm.map(f => `<div class="enaenn-rel-moment-row"><span>${esc(f.emoji)} ${esc(f.name)}</span><div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:${f.val}%"></div></div><span class="enaenn-rel-moment-val">${f.val}</span></div>`).join('');
-    return `<details class="enaenn-rel-fold"><summary><span class="enaenn-rel-fold-name">${esc(rel.name)} → User</span><span class="enaenn-rel-fold-preview">${esc(rel.mainName)} (${rel.mainVal}/1000)</span></summary><div class="enaenn-rel-fold-body"><div class="enaenn-rel-main"><span>${esc(rel.mainName)}</span><div class="enaenn-rel-bar-wrap"><div class="${barClass}" style="width:${barWidth}%"></div></div><span class="enaenn-rel-val">(${rel.mainVal}/1000)</span></div><div class="enaenn-rel-moments">${itmHTML}</div><div class="enaenn-rel-stage">Known ${esc(rel.duration)} · ${esc(rel.stage)}</div></div></details>`;
-}
-
-function buildOffscreenRowHTML(a) {
-    const v = a.vitals;
-    return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div></div>`;
-}
-
 function buildTrackerHTML(data) {
     const uid  = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const tab1 = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(buildAgentRowHTML).join('<div class="enaenn-agent-sep"></div>');
-    const tab2 = data.relationships.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relationships tracked yet.</div></div>' : data.relationships.map(buildRelFoldHTML).join('');
-    const tab3 = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(buildOffscreenRowHTML).join('');
+    const tab1 = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(a => {
+        const cond = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
+        return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals)}</div></details>${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
+    }).join('<div class="enaenn-agent-sep"></div>');
+
+    const tab2 = data.relationships.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relationships tracked yet.</div></div>' : data.relationships.map(r => {
+        const barClass = r.valence === '-' ? 'enaenn-rel-fill-neg' : 'enaenn-rel-fill';
+        const barWidth = Math.min((r.mainVal / 1000) * 100, 100).toFixed(1);
+        const itmHTML  = r.itm.map(f => `<div class="enaenn-rel-moment-row"><span>${esc(f.emoji)} ${esc(f.name)}</span><div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:${f.val}%"></div></div><span class="enaenn-rel-moment-val">${f.val}</span></div>`).join('');
+        return `<details class="enaenn-rel-fold"><summary><span class="enaenn-rel-fold-name">${esc(r.name)} → User</span><span class="enaenn-rel-fold-preview">${esc(r.mainName)} (${r.mainVal}/1000)</span></summary><div class="enaenn-rel-fold-body"><div class="enaenn-rel-main"><span>${esc(r.mainName)}</span><div class="enaenn-rel-bar-wrap"><div class="${barClass}" style="width:${barWidth}%"></div></div><span class="enaenn-rel-val">(${r.mainVal}/1000)</span></div><div class="enaenn-rel-moments">${itmHTML}</div><div class="enaenn-rel-stage">Known ${esc(r.duration)} · ${esc(r.stage)}</div></div></details>`;
+    }).join('');
+
+    const tab3 = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(a => {
+        const v = a.vitals;
+        return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div></div>`;
+    }).join('');
+
     const plans = data.plans.length === 0 ? '' : `<details class="enaenn-plans"><summary>📅 Future Plans</summary><div class="enaenn-plans-body">${data.plans.map(p => `<div class="enaenn-plan-row"><span class="enaenn-plan-date">${esc(p.date)}</span><span class="enaenn-plan-desc">${esc(p.desc)}</span></div>`).join('')}</div></details>`;
-    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}</div><div class="enaenn-tabs-box"><input type="radio" name="enaenn-${uid}" id="enaenn-t1-${uid}" checked><input type="radio" name="enaenn-${uid}" id="enaenn-t2-${uid}"><input type="radio" name="enaenn-${uid}" id="enaenn-t3-${uid}"><div class="enaenn-tab-labels"><label for="enaenn-t1-${uid}">💖 Agents Present</label><label for="enaenn-t2-${uid}">💕 Relationships</label><label for="enaenn-t3-${uid}">🌍 Off-screen Agents</label></div><div class="enaenn-tab-content"><div class="enaenn-tp1">${tab1}</div><div class="enaenn-tp2"><div class="enaenn-rel-list">${tab2}</div></div><div class="enaenn-tp3">${tab3}</div></div></div>${plans}</div>`;
+
+    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}</div><div class="enaenn-tabs-box"><input type="radio" name="enaenn-${uid}" id="enaenn-t1-${uid}" checked><input type="radio" name="enaenn-${uid}" id="enaenn-t2-${uid}"><input type="radio" name="enaenn-${uid}" id="enaenn-t3-${uid}"><div class="enaenn-tab-labels"><label for="enaenn-t1-${uid}">💖 Present</label><label for="enaenn-t2-${uid}">💕 Relations</label><label for="enaenn-t3-${uid}">🌍 Off‑screen</label></div><div class="enaenn-tab-content"><div class="enaenn-tp1">${tab1}</div><div class="enaenn-tp2"><div class="enaenn-rel-list">${tab2}</div></div><div class="enaenn-tp3">${tab3}</div></div></div>${plans}</div>`;
 }
 
-// ─── SETTINGS ─────────────────────────────────────────────────────────────────
+// ─── SETTINGS / STATE HELPERS ───────────────────────────────────────────────
 
 function initSettings() {
     if (!extension_settings[MODULE_NAME]) {
@@ -337,75 +277,175 @@ const save = (patch = {}) => {
     saveSettingsDebounced();
 };
 
-function getActiveProfile() {
-    const idx = S().activeProfileIndex;
-    if (idx < 0 || idx >= S().profiles.length) return null;
-    return S().profiles[idx];
+// ─── PER‑CHAT SNAPSHOT STORAGE ──────────────────────────────────────────────
+
+function getChatId() {
+    // currentChatId is imported from script.js
+    return currentChatId || 'default';
 }
 
-// ─── CHAT / WINDOW HELPERS ────────────────────────────────────────────────────
-
-function getTrackerIndices() {
-    return chat
-        .map((m, i) => ({ m, i }))
-        .filter(({ m }) => m.extra?.[TRACKER_FLAG] === true)
-        .map(({ i }) => i);
+function getSnapshots(chatId) {
+    const states = S().trackerStates || {};
+    return states[chatId] || [];
 }
 
-function archiveTrackerAt(idx) {
-    const m = chat[idx];
-    if (!m || m.extra?.archived) return;
-    if (!m.extra.fullContent) m.extra.fullContent = m.mes;
-    m.extra.archived = true;
-    m.mes = '<div class="enaenn-tracker-archived">📋 <em>[archived tracker]</em></div>';
-    $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(m.mes);
+function setSnapshots(chatId, snaps) {
+    const states = S().trackerStates || {};
+    states[chatId] = snaps;
+    save({ trackerStates: states });
 }
 
-function restoreTrackerAt(idx) {
-    const m = chat[idx];
-    if (!m || !m.extra?.archived) return;
-    m.mes = m.extra.labeledText || m.extra.rawData || m.extra.fullContent || m.mes;
-    m.extra.archived = false;
-    // Re-inject the pre-built HTML directly so we don't show raw text momentarily
-    const html = m.extra.fullContent || buildTrackerHTML(parseTrackerData(m.mes));
-    $(`#chat .mes[mesid="${idx}"]`).find('.mes_text').html(html);
+function getCurrentSnapshot(chatId) {
+    const snaps = getSnapshots(chatId);
+    return snaps.length ? snaps[snaps.length - 1] : null;
 }
 
-function reRenderTrackerMessages() {
-    for (const idx of getTrackerIndices()) {
-        const m = chat[idx];
-        if (!m) continue;
-        const html = m.extra?.archived
-            ? '<div class="enaenn-tracker-archived">📋 <em>[archived tracker]</em></div>'
-            : (m.extra?.fullContent || buildTrackerHTML(parseTrackerData(m.mes)));
-        const $el = $(`#chat .mes[mesid="${idx}"]`).find('.mes_text');
-        if ($el.length) $el.html(html);
+function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
+    let snaps = getSnapshots(chatId);
+    const windowSize = S().windowSize || 7;
+    snaps.push({ raw: rawText, labeled: labeledText, html: htmlContent, parsed: parsedData });
+    if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
+    setSnapshots(chatId, snaps);
+    // update overlay
+    updateOverlayContent(chatId);
+}
+
+// Restore = remove last snapshot and return the new last (or null)
+function restorePreviousSnapshot(chatId) {
+    let snaps = getSnapshots(chatId);
+    if (snaps.length <= 1) {
+        setSnapshots(chatId, []);
+        return null;
+    }
+    snaps.pop();
+    setSnapshots(chatId, snaps);
+    const restored = snaps[snaps.length - 1] || null;
+    updateOverlayContent(chatId);
+    return restored;
+}
+
+// ─── OVERLAY CREATION / MANAGEMENT ──────────────────────────────────────────
+
+let overlayVisible = false;
+let overlayCollapsed = true;
+
+function createOverlay() {
+    if (document.getElementById('enaenn-overlay')) return;
+
+    const overlay = document.createElement('div');
+    overlay.id = 'enaenn-overlay';
+    overlay.innerHTML = `
+        <div id="enaenn-overlay-header">
+            <span>📊 Tracker</span>
+            <div>
+                <button id="enaenn-overlay-collapse" title="Collapse/Expand">▾</button>
+                <button id="enaenn-overlay-close" title="Close overlay">✕</button>
+            </div>
+        </div>
+        <div id="enaenn-overlay-body"></div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Drag logic
+    let isDragging = false, startX, startY, origX, origY;
+    const header = overlay.querySelector('#enaenn-overlay-header');
+    const onDragStart = (e) => {
+        if (e.target.closest('button')) return;
+        isDragging = true;
+        const rect = overlay.getBoundingClientRect();
+        const touch = e.touches ? e.touches[0] : e;
+        startX = touch.clientX; startY = touch.clientY;
+        origX = rect.left; origY = rect.top;
+        document.addEventListener('mousemove', onDragMove);
+        document.addEventListener('touchmove', onDragMove, { passive: false });
+        document.addEventListener('mouseup', onDragEnd);
+        document.addEventListener('touchend', onDragEnd);
+        e.preventDefault();
+    };
+    const onDragMove = (e) => {
+        if (!isDragging) return;
+        const touch = e.touches ? e.touches[0] : e;
+        const dx = touch.clientX - startX;
+        const dy = touch.clientY - startY;
+        overlay.style.left = (origX + dx) + 'px';
+        overlay.style.top = (origY + dy) + 'px';
+        overlay.style.right = 'auto';
+        overlay.style.bottom = 'auto';
+        e.preventDefault();
+    };
+    const onDragEnd = () => {
+        isDragging = false;
+        document.removeEventListener('mousemove', onDragMove);
+        document.removeEventListener('touchmove', onDragMove);
+        document.removeEventListener('mouseup', onDragEnd);
+        document.removeEventListener('touchend', onDragEnd);
+    };
+    header.addEventListener('mousedown', onDragStart);
+    header.addEventListener('touchstart', onDragStart);
+
+    // Collapse toggle
+    const collapseBtn = overlay.querySelector('#enaenn-overlay-collapse');
+    collapseBtn.addEventListener('click', () => {
+        overlayCollapsed = !overlayCollapsed;
+        overlay.classList.toggle('collapsed', overlayCollapsed);
+        collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
+    });
+
+    // Close button
+    overlay.querySelector('#enaenn-overlay-close').addEventListener('click', () => {
+        toggleOverlay(false);
+    });
+
+    // initial state
+    overlay.classList.add('collapsed');
+    collapseBtn.textContent = '▸';
+    overlay.style.display = 'none';
+}
+
+function toggleOverlay(show) {
+    overlayVisible = (show !== undefined) ? show : !overlayVisible;
+    const overlay = document.getElementById('enaenn-overlay');
+    if (!overlay) return;
+    overlay.style.display = overlayVisible ? 'block' : 'none';
+    S().overlayVisible = overlayVisible;
+    save({ overlayVisible });
+}
+
+function updateOverlayContent(chatId) {
+    const overlay = document.getElementById('enaenn-overlay');
+    if (!overlay) return;
+    const body = overlay.querySelector('#enaenn-overlay-body');
+    const snap = getCurrentSnapshot(chatId);
+    if (snap) {
+        body.innerHTML = snap.html || '<div style="padding:8px;opacity:0.5;">No data</div>';
+    } else {
+        body.innerHTML = '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
     }
 }
 
-async function enforceWindow() {
-    const indices   = getTrackerIndices();
-    if (indices.length === 0) return;
-    const cutoff    = Math.max(0, indices.length - S().windowSize);
-    const toArchive = indices.slice(0, cutoff);
-    const toRestore = indices.slice(cutoff);
-    for (const idx of toArchive) { if (!chat[idx]?.extra?.archived) archiveTrackerAt(idx); }
-    for (const idx of toRestore) { if (chat[idx]?.extra?.archived)  restoreTrackerAt(idx); }
+// ─── CONTEXT INJECTION FOR MAIN AI ──────────────────────────────────────────
+
+function getInjectionText(chatId) {
+    const snap = getCurrentSnapshot(chatId);
+    if (!snap) return '';
+    // labeled text is already formatted for readability
+    return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
 }
 
-// ─── BUILD THE USER MESSAGE ────────────────────────────────────────────────────
+// ─── BUILD USER MESSAGE FOR TRACKER API ────────────────────────────────────
 
-function buildUserMessage() {
+function buildTrackerPrompt(chatId) {
     const recentRoleplay = chat
-        .filter(m => !m.extra?.[TRACKER_FLAG])
-        .slice(-(S().contextMessages));
+        .filter(m => !m.extra?.[TRACKER_FLAG]) // ignore legacy trackers in chat
+        .slice(-(S().contextMessages || 20));
 
     const chatText = recentRoleplay
         .map(m => `${m.name || (m.is_user ? 'User' : 'Character')}: ${m.mes || ''}`)
         .join('\n\n');
 
-    const prevState = S().lastTracker
-        ? `PREVIOUS TRACKER STATE (plain text — update from this):\n${S().lastTracker}`
+    const prevSnap = getCurrentSnapshot(chatId);
+    const prevState = prevSnap
+        ? `PREVIOUS TRACKER STATE (plain text — update from this):\n${prevSnap.raw}`
         : 'No previous tracker state. Initialize fresh from chat context.';
 
     return (
@@ -415,23 +455,48 @@ function buildUserMessage() {
     );
 }
 
-// ─── TRACKER API CALL — VIA ST BACKEND PROXY ─────────────────────────────────
+// ─── API CALL (using ST profiles) ───────────────────────────────────────────
 
-async function callViaSTBackend(userMessage) {
-    const profile = getActiveProfile();
-    if (!profile) {
-        toastr.warning('enaennTracker: No API profile selected. Open Extensions → enaennTracker.');
-        return null;
+function resolveProfile() {
+    const selected = S().selectedProfile || 'same';
+    if (selected === 'same') {
+        // Use the currently active main API profile
+        const mainProfile = settings.api_profiles?.find(p => p.active) || settings.api_profiles?.[0];
+        if (!mainProfile) {
+            toastr.warning('No active main API profile found. Please select one in SillyTavern settings.');
+            return null;
+        }
+        return {
+            endpoint: mainProfile.endpoint || '',
+            apiKey:   mainProfile.apiKey   || '',
+            model:    mainProfile.model    || '',
+        };
+    } else {
+        // Find by name
+        const profile = settings.api_profiles?.find(p => p.name === selected);
+        if (!profile) {
+            toastr.warning(`Profile "${selected}" not found. Please check your API profiles.`);
+            return null;
+        }
+        return {
+            endpoint: profile.endpoint || '',
+            apiKey:   profile.apiKey   || '',
+            model:    profile.model    || '',
+        };
     }
+}
 
-    const endpoint = (profile.endpoint || '').trim().replace(/\/+$/, '');
-    const model    = (profile.model    || '').trim();
-    const apiKey   = (profile.apiKey   || '').trim();
+async function callTrackerAPI(chatId) {
+    const profile = resolveProfile();
+    if (!profile) return null;
 
+    const { endpoint, apiKey, model } = profile;
     if (!endpoint || !model) {
-        toastr.warning('enaennTracker: Active profile is missing Endpoint URL or Model name.');
+        toastr.warning('Tracker profile is missing Endpoint or Model.');
         return null;
     }
+
+    const userMessage = buildTrackerPrompt(chatId);
 
     try {
         const response = await fetch('/api/backends/chat-completions/generate', {
@@ -470,134 +535,48 @@ async function callViaSTBackend(userMessage) {
     }
 }
 
-// ─── UNIFIED TRACKER API CALL ─────────────────────────────────────────────────
-
-async function callTrackerAPI() {
-    return callViaSTBackend(buildUserMessage());
-}
-
-// ─── INSERT TRACKER MESSAGE ───────────────────────────────────────────────────
-
-let _addOneMessage = null;
-
-async function insertTrackerMessage(rawText) {
-    // labeledText = emoji-prefixed vitals for main model readability; stored in mes.
-    // rawData     = original tracker output; kept for the next API call ("previous state").
-    // htmlContent = pre-built card HTML; used by restore/re-render and as DOM fallback.
-    const labeledText = formatTrackerForContext(rawText);
-    const htmlContent = buildTrackerHTML(parseTrackerData(rawText));
-
-    const mesObj = {
-        name:      'Tracker',
-        is_user:   false,
-        is_system: false,
-        mes:       labeledText,   // emoji-labeled plain text — kept short for context tokens
-        send_date: new Date().toLocaleString(),
-        extra: {
-            [TRACKER_FLAG]: true,
-            type:           'narrator',
-            fullContent:    htmlContent,  // pre-built HTML for restore/re-render
-            rawData:        rawText,      // original format for the next tracker API call
-            labeledText:    labeledText,  // saved so restore also gives main model labeled text
-            archived:       false,
-            token_count:    0,
-        },
-    };
-
-    chat.push(mesObj);
-    const mesId = chat.length - 1;
-
-    if (_addOneMessage) {
-        try {
-            // addOneMessage triggers ST's rendering pipeline which fires the find-regex.
-            // Placement [1,2] in the regex JSON covers narrator/AI-output messages.
-            await _addOneMessage(mesObj, { scroll: true, type: 'narrator' });
-
-            // Safety fallback: if the regex didn't fire and transform the text into
-            // the tracker card, inject the pre-built HTML directly so the card always shows.
-            const $el = $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text');
-            if ($el.length && !$el.find('.enaenn-tracker-block').length) {
-                $el.html(htmlContent);
-            }
-
-            const $chat = $('#chat');
-            $chat.scrollTop($chat[0].scrollHeight);
-            return;
-        } catch (e) {
-            console.warn('[enaennTracker] addOneMessage threw, falling back to DOM:', e);
-        }
-    }
-
-    // Full DOM fallback — inject pre-built HTML directly
-    $('#chat').append(`<div class="mes" mesid="${mesId}" is_system="false"><div class="mes_block"><div class="ch_name"><span class="name_text">Tracker</span></div><div class="mes_text"></div></div></div>`);
-    $(`#chat .mes[mesid="${mesId}"]`).find('.mes_text').html(htmlContent);
-    $('#chat').scrollTop($('#chat')[0].scrollHeight);
-}
-
-// ─── DELETE LAST TRACKER ──────────────────────────────────────────────────────
-
-async function deleteLastTracker() {
-    const indices = getTrackerIndices();
-    if (indices.length === 0) {
-        toastr.info('No tracker to delete.');
-        return false;
-    }
-
-    const lastIdx = indices[indices.length - 1];
-
-    // Remove from DOM
-    $(`#chat .mes[mesid="${lastIdx}"]`).remove();
-
-    // Remove from chat array (splice and re-index remaining DOM elements)
-    chat.splice(lastIdx, 1);
-
-    // Re-index all subsequent DOM messages so mesid attributes stay in sync
-    $('#chat .mes').each(function () {
-        const id = parseInt($(this).attr('mesid'));
-        if (id > lastIdx) $(this).attr('mesid', id - 1);
-    });
-
-    // Roll lastTracker back to the previous tracker's plain text (if any)
-    const remaining = getTrackerIndices();
-    if (remaining.length > 0) {
-        const prevMsg = chat[remaining[remaining.length - 1]];
-        save({ lastTracker: prevMsg?.extra?.rawData || prevMsg?.extra?.fullContent || prevMsg?.mes || '' });
-    } else {
-        save({ lastTracker: '' });
-    }
-
-    return true;
-}
-
-// ─── MAIN UPDATE FLOW ─────────────────────────────────────────────────────────
+// ─── MAIN UPDATE FLOW ───────────────────────────────────────────────────────
 
 let _updating = false;
 
 async function updateTracker() {
     if (_updating) return;
     if (!S().enabled) return;
+    const chatId = getChatId();
 
     _updating = true;
     setLoadingState(true);
 
-    const rawResult = await callTrackerAPI();
+    const rawResult = await callTrackerAPI(chatId);
 
     setLoadingState(false);
     _updating = false;
 
     if (!rawResult) return;
 
-    // Save the plain text as the previous state for the next API call
-    save({ lastTracker: rawResult });
+    // Parse and build derived data
+    const parsed = parseTrackerData(rawResult);
+    const labeled = formatTrackerForContext(rawResult); // uses the existing formatter
+    const html = buildTrackerHTML(parsed);
 
-    // Insert as plain text — ST's regex pipeline renders the HTML card
-    await insertTrackerMessage(rawResult);
-    await enforceWindow();
-
+    saveSnapshot(chatId, rawResult, labeled, html, parsed);
     toastr.success('Tracker updated!', '', { timeOut: 1500 });
 }
 
-// ─── UI ───────────────────────────────────────────────────────────────────────
+// ─── DELETE / RESTORE ────────────────────────────────────────────────────────
+
+async function deleteLastTracker() {
+    const chatId = getChatId();
+    const restored = restorePreviousSnapshot(chatId);
+    if (!restored) {
+        toastr.info('No previous snapshot to restore to.');
+    } else {
+        toastr.success('Restored previous tracker snapshot.');
+    }
+    return !!restored;
+}
+
+// ─── UI HELPERS ──────────────────────────────────────────────────────────────
 
 function setLoadingState(loading) {
     $('#enaennTracker_refreshBtn')
@@ -608,37 +587,16 @@ function setLoadingState(loading) {
         .text(loading ? '⏳ Updating…' : '♻️ Regenerate');
     $('#enaennTracker_toolbarBtn')
         .prop('disabled', loading)
-        .text(loading ? '⏳' : '🔄');
+        .text(loading ? '⏳' : '📊');
 }
 
-function refreshProfileSelect() {
-    const $sel = $('#enaennTracker_profileSelect')
-        .empty()
-        .append('<option value="-1">— Select a profile —</option>');
-    S().profiles.forEach((p, i) => {
-        $sel.append(`<option value="${i}"${i === S().activeProfileIndex ? ' selected' : ''}>${p.name || 'Unnamed'}</option>`);
-    });
-}
-
-function refreshProfileEditor() {
-    const idx = S().activeProfileIndex;
-    if (idx < 0 || idx >= S().profiles.length) {
-        $('#enaennTracker_profileEditor').slideUp(150);
-        return;
-    }
-    const p = S().profiles[idx];
-    $('#enaennTracker_pName').val(p.name     || '');
-    $('#enaennTracker_pEndpoint').val(p.endpoint || '');
-    $('#enaennTracker_pKey').val(p.apiKey    || '');
-    $('#enaennTracker_pModel').val(p.model    || '');
-    $('#enaennTracker_profileEditor').slideDown(150);
-}
+// ─── SETTINGS UI ─────────────────────────────────────────────────────────────
 
 const SETTINGS_HTML = `
 <div id="enaennTracker_root" class="extension_settings">
   <div class="inline-drawer">
     <div class="inline-drawer-toggle inline-drawer-header">
-      <b>🔄 enaennTracker</b>
+      <b>📊 enaennTracker</b>
       <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
     </div>
     <div class="inline-drawer-content">
@@ -652,6 +610,7 @@ const SETTINGS_HTML = `
           <input type="checkbox" id="enaennTracker_autoUpdate" />
           <span>Auto-update after each reply</span>
         </label>
+        <button id="enaennTracker_toggleOverlayBtn" class="menu_button">👁️ Show/Hide Overlay</button>
       </div>
 
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
@@ -660,48 +619,48 @@ const SETTINGS_HTML = `
       </div>
 
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
-        <label style="white-space:nowrap; min-width:175px;">Tracker snapshots visible to model:</label>
+        <label style="white-space:nowrap; min-width:175px;">Tracker snapshots kept per chat:</label>
         <input type="number" id="enaennTracker_windowSize" min="1" max="50" class="text_pole" style="width:60px;" />
-        <span style="font-size:0.78em; opacity:0.5;">(older ones archived)</span>
       </div>
 
       <hr />
 
-      <div class="enaenn-gap" style="font-weight:bold;">API Profiles</div>
+      <div class="enaenn-gap" style="font-weight:bold;">Tracker API Connection</div>
       <div style="font-size:0.78em; opacity:0.6; margin-bottom:6px;">
-        Requests are routed through ST's server — works on all browsers including iOS Safari.
+        Choose a profile from your main SillyTavern API connections, or use the currently active main API.
       </div>
-
       <div class="flex-container flexGap5 enaenn-gap">
         <select id="enaennTracker_profileSelect" class="text_pole flex1"></select>
-        <button id="enaennTracker_addProfile"    class="menu_button" title="New profile">➕</button>
-        <button id="enaennTracker_deleteProfile" class="menu_button" title="Delete selected">🗑️</button>
-      </div>
-
-      <div id="enaennTracker_profileEditor">
-        <div class="editor-title">Edit Profile</div>
-        <label>Name</label>
-        <input type="text"     id="enaennTracker_pName"     class="text_pole" placeholder="e.g. Longcat" />
-        <label>Endpoint URL <small>(include /v1, e.g. https://api.openai.com/v1)</small></label>
-        <input type="text"     id="enaennTracker_pEndpoint" class="text_pole" placeholder="https://api.openai.com/v1" />
-        <label>API Key <small>(leave blank if not needed)</small></label>
-        <input type="password" id="enaennTracker_pKey"      class="text_pole" placeholder="sk-..." />
-        <label>Model name</label>
-        <input type="text"     id="enaennTracker_pModel"    class="text_pole" placeholder="gpt-4o-mini" />
-        <button id="enaennTracker_saveProfile" class="menu_button" style="margin-top:8px;">💾 Save Profile</button>
       </div>
 
       <hr />
 
       <div class="flex-container flexGap5">
         <button id="enaennTracker_refreshBtn"    class="menu_button flex1">🔄 Refresh Tracker</button>
-        <button id="enaennTracker_regenBtn"      class="menu_button flex1" title="Delete the last tracker and generate a fresh one.">♻️ Regenerate</button>
-        <button id="enaennTracker_clearBtn"      class="menu_button" title="Clears saved tracker state. Next refresh starts fresh.">🗑️ Clear State</button>
+        <button id="enaennTracker_regenBtn"      class="menu_button flex1" title="Undo the last tracker update (restore previous snapshot).">♻️ Restore Previous</button>
+        <button id="enaennTracker_clearBtn"      class="menu_button" title="Clear all snapshots for this chat.">🗑️ Clear State</button>
       </div>
 
     </div>
   </div>
 </div>`;
+
+// ─── BIND UI ────────────────────────────────────────────────────────────────
+
+function refreshProfileSelect() {
+    const $sel = $('#enaennTracker_profileSelect').empty();
+    $sel.append('<option value="same">✦ Same As Main API</option>');
+    const profiles = settings.api_profiles || [];
+    if (profiles.length === 0) {
+        $sel.append('<option value="" disabled>— No profiles found —</option>');
+    } else {
+        profiles.forEach(p => {
+            const name = p.name || 'Unnamed';
+            $sel.append(`<option value="${esc(name)}">${esc(name)}</option>`);
+        });
+    }
+    $sel.val(S().selectedProfile || 'same');
+}
 
 function bindUI() {
     $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
@@ -710,96 +669,100 @@ function bindUI() {
     $('#enaennTracker_windowSize').on('change', function () {
         const v = Math.max(1, parseInt(this.value) || 7);
         save({ windowSize: v });
-        enforceWindow();
+        // enforce limit on current chat's snapshots
+        const chatId = getChatId();
+        const snaps = getSnapshots(chatId);
+        if (snaps.length > v) {
+            setSnapshots(chatId, snaps.slice(-v));
+        }
     });
 
     $('#enaennTracker_profileSelect').on('change', function () {
-        save({ activeProfileIndex: parseInt(this.value) });
-        refreshProfileEditor();
+        save({ selectedProfile: this.value });
     });
 
-    $('#enaennTracker_addProfile').on('click', () => {
-        const profiles = [...S().profiles, { name: 'New Profile', endpoint: '', apiKey: '', model: '' }];
-        save({ profiles, activeProfileIndex: profiles.length - 1 });
-        refreshProfileSelect();
-        refreshProfileEditor();
-    });
-
-    $('#enaennTracker_deleteProfile').on('click', () => {
-        const idx = S().activeProfileIndex;
-        if (idx < 0) return;
-        const profiles = S().profiles.filter((_, i) => i !== idx);
-        const newIdx   = profiles.length === 0 ? -1 : Math.min(idx, profiles.length - 1);
-        save({ profiles, activeProfileIndex: newIdx });
-        refreshProfileSelect();
-        refreshProfileEditor();
-    });
-
-    $('#enaennTracker_saveProfile').on('click', () => {
-        const idx = S().activeProfileIndex;
-        if (idx < 0) return;
-        const profiles = [...S().profiles];
-        profiles[idx] = {
-            name:     $('#enaennTracker_pName').val().trim()     || 'Unnamed',
-            endpoint: $('#enaennTracker_pEndpoint').val().trim(),
-            apiKey:   $('#enaennTracker_pKey').val().trim(),
-            model:    $('#enaennTracker_pModel').val().trim(),
-        };
-        save({ profiles });
-        refreshProfileSelect();
-        toastr.success('Profile saved!');
+    $('#enaennTracker_toggleOverlayBtn').on('click', () => {
+        toggleOverlay();
     });
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
     $('#enaennTracker_regenBtn').on('click', async () => {
-        const deleted = await deleteLastTracker();
-        if (deleted) await updateTracker();
+        await deleteLastTracker();
     });
     $('#enaennTracker_clearBtn').on('click', () => {
-        save({ lastTracker: '' });
-        toastr.info('Tracker state cleared. Next refresh will start fresh.');
+        const chatId = getChatId();
+        setSnapshots(chatId, []);
+        updateOverlayContent(chatId);
+        toastr.info('Tracker state cleared for this chat.');
     });
 }
+
+// ─── TOOLBAR BUTTON ──────────────────────────────────────────────────────────
 
 function addToolbarButton() {
     if ($('#enaennTracker_toolbarBtn').length) return;
-    const $btn = $(`<div id="enaennTracker_toolbarBtn" title="Refresh enaennTracker" class="interactable">🔄</div>`);
-    $btn.on('click', () => updateTracker());
+    const $btn = $(`<div id="enaennTracker_toolbarBtn" title="Toggle enaennTracker overlay" class="interactable">📊</div>`);
+    $btn.on('click', () => toggleOverlay());
     $('#send_but_sheld').prepend($btn);
 }
 
-// ─── INIT ─────────────────────────────────────────────────────────────────────
+// ─── INIT ────────────────────────────────────────────────────────────────────
 
 jQuery(async () => {
     initSettings();
+    createOverlay();
 
-    if (typeof addOneMessage === 'function') {
-        _addOneMessage = addOneMessage;
-        console.log('[enaennTracker] addOneMessage loaded via static import.');
-    } else {
-        try {
-            const mod = await import('../../../../script.js');
-            _addOneMessage = (typeof mod.addOneMessage === 'function') ? mod.addOneMessage : null;
-            console.log(_addOneMessage
-                ? '[enaennTracker] addOneMessage loaded via dynamic import.'
-                : '[enaennTracker] addOneMessage not found in module, using DOM fallback.');
-        } catch (e) {
-            console.warn('[enaennTracker] Dynamic import failed, using DOM fallback:', e);
-        }
+    // Restore overlay visibility from settings
+    if (S().overlayVisible) {
+        toggleOverlay(true);
     }
 
-    $('#extensions_settings2').append(SETTINGS_HTML);
-
+    // Apply saved settings to UI
     $('#enaennTracker_enabled').prop('checked',   S().enabled);
     $('#enaennTracker_autoUpdate').prop('checked', S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
     $('#enaennTracker_windowSize').val(S().windowSize);
-    refreshProfileSelect();
-    refreshProfileEditor();
 
+    $('#extensions_settings2').append(SETTINGS_HTML);
+    refreshProfileSelect();
     bindUI();
     addToolbarButton();
 
+    // Show the current chat's tracker in overlay
+    const chatId = getChatId();
+    updateOverlayContent(chatId);
+
+    // ─── CONTEXT INJECTION ────────────────────────────────────────────────
+    eventSource.on(event_types.GENERATE_AFTER_COMBINE, (args) => {
+        if (!S().enabled) return;
+        const chatId = getChatId();
+        const injection = getInjectionText(chatId);
+        if (!injection) return;
+
+        // Append the tracker state right before the user's input (depth 0)
+        // In ST, the final prompt is a string; we can insert it before the last {{user}} block.
+        // We'll just append it at the very end of the system/history block.
+        // `args` usually contains `prompt` or `messages`. I'll handle both.
+        if (args && typeof args === 'object') {
+            if (args.prompt !== undefined) {
+                args.prompt += injection;
+            } else if (args.messages !== undefined && Array.isArray(args.messages)) {
+                // Insert as a system message just before the last user message
+                const lastUserIdx = args.messages.length - 1;
+                // Find the last user message
+                let insertIdx = args.messages.length;
+                for (let i = args.messages.length - 1; i >= 0; i--) {
+                    if (args.messages[i].role === 'user') {
+                        insertIdx = i;
+                        break;
+                    }
+                }
+                args.messages.splice(insertIdx, 0, { role: 'system', content: injection.trim() });
+            }
+        }
+    });
+
+    // ─── AUTO‑UPDATE AFTER REPLY ──────────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
         if (S().enabled && S().autoUpdate) {
             await new Promise(r => setTimeout(r, 700));
@@ -807,11 +770,15 @@ jQuery(async () => {
         }
     });
 
+    // ─── CHAT CHANGED: reset display, but don't auto‑generate ────────────
     eventSource.on(event_types.CHAT_CHANGED, async () => {
-        save({ lastTracker: '' });
-        await enforceWindow();
-        setTimeout(reRenderTrackerMessages, 600);
+        const chatId = getChatId();
+        updateOverlayContent(chatId);
+        // force overlay visibility if it was previously visible
+        if (S().overlayVisible) {
+            toggleOverlay(true);
+        }
     });
 
-    console.log('[enaennTracker] Loaded successfully.');
+    console.log('[enaennTracker] Loaded successfully (overlay mode).');
 });
