@@ -1,6 +1,6 @@
 'use strict';
 
-// ─── STATIC IMPORTS ───────────────────────────────────────────────────────────
+// ─── IMPORTS ──────────────────────────────────────────────────────────────────
 
 import {
     eventSource,
@@ -8,8 +8,8 @@ import {
     saveSettingsDebounced,
     chat,
     getRequestHeaders,
-    settings,            // ← for reading main API profiles
-    currentChatId,       // ← for per‑chat storage
+    settings,               // main ST settings (contains api_profiles)
+    getContext,
 } from '../../../../script.js';
 
 import {
@@ -19,16 +19,16 @@ import {
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
 const MODULE_NAME  = 'enaennTracker';
-const TRACKER_FLAG = 'enaenn_tracker'; // kept for legacy, not used for new messages
+const TRACKER_FLAG = 'enaenn_tracker'; // legacy, kept for compatibility
 
 const DEFAULT_SETTINGS = {
     enabled:            true,
     autoUpdate:         true,
     contextMessages:    20,
-    windowSize:         7,             // number of snapshots kept per chat
-    selectedProfile:    'same',        // 'same' or profile name
-    overlayVisible:     false,         // start hidden
-    trackerStates:      {},            // { chatId: [ snapshot, ... ] }
+    windowSize:         7,              // snapshots kept per chat
+    selectedProfile:    'same',         // 'same' or profile name
+    overlayVisible:     false,          // start hidden
+    trackerStates:      {},             // { chatId: [ snapshot, ... ] }
 };
 
 // ─── TRACKER SYSTEM PROMPT (unchanged) ──────────────────────────────────────
@@ -150,7 +150,7 @@ REL: Clara | 295 | Interested Amiability | + | 8 months | Acquaintances | 😊 |
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
-// ─── VITAL METADATA & HELPERS (unchanged) ──────────────────────────────────
+// ─── VITAL METADATA & HELPERS ──────────────────────────────────────────────
 
 const VITAL_META = [
     { key: 'satiation',   emoji: '🍴', label: 'Satiation',   text: 'food',    polarity: 'low'    },
@@ -164,7 +164,17 @@ const VITAL_META = [
 
 const numVal = (s) => parseFloat(String(s ?? '').replace(/[^0-9.]/g, '')) || 0;
 
-// ─── DATA PARSER (unchanged) ────────────────────────────────────────────────
+function vitalColorClass(polarity, value) {
+    if (polarity === 'arousal') return 'enaenn-fill-arousal';
+    if (polarity === 'low')     return value >= 50 ? 'enaenn-fill-ok' : value >= 25 ? 'enaenn-fill-warn' : 'enaenn-fill-crit';
+    return value <= 50 ? 'enaenn-fill-ok' : value <= 74 ? 'enaenn-fill-warn' : 'enaenn-fill-crit';
+}
+
+function esc(str) {
+    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ─── DATA PARSER ─────────────────────────────────────────────────────────────
 
 function parseTrackerData(text) {
     const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [] };
@@ -216,18 +226,12 @@ function parseTrackerData(text) {
     return data;
 }
 
-// ─── HTML BUILDERS (for the overlay) ─────────────────────────────────────────
-
-function esc(str) {
-    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+// ─── HTML BUILDER FOR TRACKER CARD ──────────────────────────────────────────
 
 function buildVitalsHTML(vitals) {
     return VITAL_META.map(({ key, emoji, label, polarity }) => {
         const v = vitals[key] || { val: 0, delta: '—' };
-        const colorCls = polarity === 'arousal' ? 'enaenn-fill-arousal'
-            : polarity === 'low' ? (v.val >= 50 ? 'enaenn-fill-ok' : v.val >= 25 ? 'enaenn-fill-warn' : 'enaenn-fill-crit')
-            : (v.val <= 50 ? 'enaenn-fill-ok' : v.val <= 74 ? 'enaenn-fill-warn' : 'enaenn-fill-crit');
+        const colorCls = vitalColorClass(polarity, v.val);
         const barWidth = polarity === 'arousal' ? Math.min(v.val, 100) : v.val;
         return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${emoji}</span><span class="enaenn-vital-label">${label}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${v.val}%</span><span class="enaenn-vital-delta">(${esc(v.delta)})</span></div>`;
     }).join('\n');
@@ -257,7 +261,40 @@ function buildTrackerHTML(data) {
     return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}</div><div class="enaenn-tabs-box"><input type="radio" name="enaenn-${uid}" id="enaenn-t1-${uid}" checked><input type="radio" name="enaenn-${uid}" id="enaenn-t2-${uid}"><input type="radio" name="enaenn-${uid}" id="enaenn-t3-${uid}"><div class="enaenn-tab-labels"><label for="enaenn-t1-${uid}">💖 Present</label><label for="enaenn-t2-${uid}">💕 Relations</label><label for="enaenn-t3-${uid}">🌍 Off‑screen</label></div><div class="enaenn-tab-content"><div class="enaenn-tp1">${tab1}</div><div class="enaenn-tp2"><div class="enaenn-rel-list">${tab2}</div></div><div class="enaenn-tp3">${tab3}</div></div></div>${plans}</div>`;
 }
 
-// ─── SETTINGS / STATE HELPERS ───────────────────────────────────────────────
+// ─── FORMAT TRACKER FOR CONTEXT (label vitals with words) ─────────────────
+
+function formatTrackerForContext(raw) {
+    return raw.split('\n').map(line => {
+        const t = line.trim();
+        if (!t) return line;
+        if (t.startsWith('AGENT:')) {
+            const parts = t.slice('AGENT:'.length).split('|').map(s => s.trim());
+            if (parts.length < 19) return line;
+            const vt = VITAL_META.map(m => m.text);
+            for (let i = 0; i < 7; i++) {
+                const rawVal = parts[3 + i].replace(/^[^\d-+.]+/, '');
+                const rawDel = parts[10 + i].replace(/^Δ\w+:/, '');
+                parts[3 + i]  = `${vt[i]}:${rawVal}`;
+                parts[10 + i] = `Δ${vt[i]}:${rawDel}`;
+            }
+            return 'AGENT: ' + parts.join(' | ');
+        }
+        if (t.startsWith('REL:')) return 'RELATIONSHIP:' + t.slice('REL:'.length);
+        if (t.startsWith('OFFSCREEN:')) {
+            const parts = t.slice('OFFSCREEN:'.length).split('|').map(s => s.trim());
+            if (parts.length < 12) return line;
+            const labels = ['food', 'energy', 'hygiene', 'bladder', 'thirst', 'arousal', 'stress'];
+            for (let i = 0; i < 7; i++) {
+                const rawVal = parts[4 + i].replace(/^\w+:/, '');
+                parts[4 + i] = `${labels[i]}:${rawVal}`;
+            }
+            return 'OFFSCREEN: ' + parts.join(' | ');
+        }
+        return line;
+    }).join('\n');
+}
+
+// ─── SETTINGS / STATE ────────────────────────────────────────────────────────
 
 function initSettings() {
     if (!extension_settings[MODULE_NAME]) {
@@ -280,8 +317,10 @@ const save = (patch = {}) => {
 // ─── PER‑CHAT SNAPSHOT STORAGE ──────────────────────────────────────────────
 
 function getChatId() {
-    // currentChatId is imported from script.js
-    return currentChatId || 'default';
+    try {
+        const ctx = getContext();
+        return ctx.chatId || ctx.getCurrentChatId?.() || 'default';
+    } catch { return 'default'; }
 }
 
 function getSnapshots(chatId) {
@@ -306,11 +345,9 @@ function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
     snaps.push({ raw: rawText, labeled: labeledText, html: htmlContent, parsed: parsedData });
     if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
     setSnapshots(chatId, snaps);
-    // update overlay
     updateOverlayContent(chatId);
 }
 
-// Restore = remove last snapshot and return the new last (or null)
 function restorePreviousSnapshot(chatId) {
     let snaps = getSnapshots(chatId);
     if (snaps.length <= 1) {
@@ -324,7 +361,7 @@ function restorePreviousSnapshot(chatId) {
     return restored;
 }
 
-// ─── OVERLAY CREATION / MANAGEMENT ──────────────────────────────────────────
+// ─── OVERLAY CREATION ─────────────────────────────────────────────────────────
 
 let overlayVisible = false;
 let overlayCollapsed = true;
@@ -338,7 +375,7 @@ function createOverlay() {
         <div id="enaenn-overlay-header">
             <span>📊 Tracker</span>
             <div>
-                <button id="enaenn-overlay-collapse" title="Collapse/Expand">▾</button>
+                <button id="enaenn-overlay-collapse" title="Collapse/Expand">▸</button>
                 <button id="enaenn-overlay-close" title="Close overlay">✕</button>
             </div>
         </div>
@@ -423,20 +460,19 @@ function updateOverlayContent(chatId) {
     }
 }
 
-// ─── CONTEXT INJECTION FOR MAIN AI ──────────────────────────────────────────
+// ─── CONTEXT INJECTION ──────────────────────────────────────────────────────
 
 function getInjectionText(chatId) {
     const snap = getCurrentSnapshot(chatId);
     if (!snap) return '';
-    // labeled text is already formatted for readability
     return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
 }
 
-// ─── BUILD USER MESSAGE FOR TRACKER API ────────────────────────────────────
+// ─── BUILD TRACKER PROMPT ────────────────────────────────────────────────────
 
 function buildTrackerPrompt(chatId) {
     const recentRoleplay = chat
-        .filter(m => !m.extra?.[TRACKER_FLAG]) // ignore legacy trackers in chat
+        .filter(m => !m.extra?.[TRACKER_FLAG])
         .slice(-(S().contextMessages || 20));
 
     const chatText = recentRoleplay
@@ -535,7 +571,7 @@ async function callTrackerAPI(chatId) {
     }
 }
 
-// ─── MAIN UPDATE FLOW ───────────────────────────────────────────────────────
+// ─── MAIN UPDATE FLOW ────────────────────────────────────────────────────────
 
 let _updating = false;
 
@@ -554,9 +590,8 @@ async function updateTracker() {
 
     if (!rawResult) return;
 
-    // Parse and build derived data
     const parsed = parseTrackerData(rawResult);
-    const labeled = formatTrackerForContext(rawResult); // uses the existing formatter
+    const labeled = formatTrackerForContext(rawResult);
     const html = buildTrackerHTML(parsed);
 
     saveSnapshot(chatId, rawResult, labeled, html, parsed);
@@ -584,7 +619,7 @@ function setLoadingState(loading) {
         .text(loading ? '⏳ Updating…' : '🔄 Refresh Tracker');
     $('#enaennTracker_regenBtn')
         .prop('disabled', loading)
-        .text(loading ? '⏳ Updating…' : '♻️ Regenerate');
+        .text(loading ? '⏳ Updating…' : '♻️ Restore Previous');
     $('#enaennTracker_toolbarBtn')
         .prop('disabled', loading)
         .text(loading ? '⏳' : '📊');
@@ -645,7 +680,7 @@ const SETTINGS_HTML = `
   </div>
 </div>`;
 
-// ─── BIND UI ────────────────────────────────────────────────────────────────
+// ─── BIND UI ─────────────────────────────────────────────────────────────────
 
 function refreshProfileSelect() {
     const $sel = $('#enaennTracker_profileSelect').empty();
@@ -669,26 +704,19 @@ function bindUI() {
     $('#enaennTracker_windowSize').on('change', function () {
         const v = Math.max(1, parseInt(this.value) || 7);
         save({ windowSize: v });
-        // enforce limit on current chat's snapshots
         const chatId = getChatId();
         const snaps = getSnapshots(chatId);
-        if (snaps.length > v) {
-            setSnapshots(chatId, snaps.slice(-v));
-        }
+        if (snaps.length > v) setSnapshots(chatId, snaps.slice(-v));
     });
 
     $('#enaennTracker_profileSelect').on('change', function () {
         save({ selectedProfile: this.value });
     });
 
-    $('#enaennTracker_toggleOverlayBtn').on('click', () => {
-        toggleOverlay();
-    });
+    $('#enaennTracker_toggleOverlayBtn').on('click', () => toggleOverlay());
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
-    $('#enaennTracker_regenBtn').on('click', async () => {
-        await deleteLastTracker();
-    });
+    $('#enaennTracker_regenBtn').on('click', async () => { await deleteLastTracker(); });
     $('#enaennTracker_clearBtn').on('click', () => {
         const chatId = getChatId();
         setSnapshots(chatId, []);
@@ -712,12 +740,8 @@ jQuery(async () => {
     initSettings();
     createOverlay();
 
-    // Restore overlay visibility from settings
-    if (S().overlayVisible) {
-        toggleOverlay(true);
-    }
+    if (S().overlayVisible) toggleOverlay(true);
 
-    // Apply saved settings to UI
     $('#enaennTracker_enabled').prop('checked',   S().enabled);
     $('#enaennTracker_autoUpdate').prop('checked', S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
@@ -728,7 +752,6 @@ jQuery(async () => {
     bindUI();
     addToolbarButton();
 
-    // Show the current chat's tracker in overlay
     const chatId = getChatId();
     updateOverlayContent(chatId);
 
@@ -739,23 +762,13 @@ jQuery(async () => {
         const injection = getInjectionText(chatId);
         if (!injection) return;
 
-        // Append the tracker state right before the user's input (depth 0)
-        // In ST, the final prompt is a string; we can insert it before the last {{user}} block.
-        // We'll just append it at the very end of the system/history block.
-        // `args` usually contains `prompt` or `messages`. I'll handle both.
         if (args && typeof args === 'object') {
             if (args.prompt !== undefined) {
                 args.prompt += injection;
             } else if (args.messages !== undefined && Array.isArray(args.messages)) {
-                // Insert as a system message just before the last user message
-                const lastUserIdx = args.messages.length - 1;
-                // Find the last user message
                 let insertIdx = args.messages.length;
                 for (let i = args.messages.length - 1; i >= 0; i--) {
-                    if (args.messages[i].role === 'user') {
-                        insertIdx = i;
-                        break;
-                    }
+                    if (args.messages[i].role === 'user') { insertIdx = i; break; }
                 }
                 args.messages.splice(insertIdx, 0, { role: 'system', content: injection.trim() });
             }
@@ -774,10 +787,7 @@ jQuery(async () => {
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         const chatId = getChatId();
         updateOverlayContent(chatId);
-        // force overlay visibility if it was previously visible
-        if (S().overlayVisible) {
-            toggleOverlay(true);
-        }
+        if (S().overlayVisible) toggleOverlay(true);
     });
 
     console.log('[enaennTracker] Loaded successfully (overlay mode).');
