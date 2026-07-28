@@ -8,7 +8,7 @@ import {
     saveSettingsDebounced,
     chat,
     getRequestHeaders,
-    extension_prompts,
+    setExtensionPrompt,
     extension_prompt_roles,
     extension_prompt_types
 } from '../../../../script.js';
@@ -515,18 +515,21 @@ function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
     if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
     setSnapshots(chatId, snaps);
     updateOverlayContent(chatId);
+    refreshExtensionPrompt();
 }
 
 function restorePreviousSnapshot(chatId) {
     let snaps = getSnapshots(chatId);
     if (snaps.length <= 1) {
         setSnapshots(chatId, []);
+        refreshExtensionPrompt();
         return null;
     }
     snaps.pop();
     setSnapshots(chatId, snaps);
     const restored = snaps[snaps.length - 1] || null;
     updateOverlayContent(chatId);
+    refreshExtensionPrompt();
     return restored;
 }
 
@@ -730,6 +733,18 @@ function getInjectionText(chatId) {
     const snap = getCurrentSnapshot(chatId);
     if (!snap) return '';
     return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
+}
+
+function refreshExtensionPrompt() {
+    const text = S().enabled ? getInjectionText(getChatId()) : '';
+    setExtensionPrompt(
+        TRACKER_FLAG,
+        text,
+        extension_prompt_types.IN_PROMPT,   // where in the prompt
+        0,                                  // depth (0 = top / before chat)
+        false,                              // scan (WI trigger) — no
+        extension_prompt_roles.SYSTEM,      // role
+    );
 }
 
 // ─── BUILD TRACKER PROMPT ─────────────────────────────────────────────────────
@@ -1321,7 +1336,7 @@ const SETTINGS_HTML = `
 // ─── BIND UI ──────────────────────────────────────────────────────────────────
 
 function bindUI() {
-    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); });
+    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); refreshExtensionPrompt(); });
     $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
     $('#enaennTracker_ctxSize').on('change',    function () { save({ contextMessages: Math.max(5,  parseInt(this.value) || 20) }); });
     $('#enaennTracker_windowSize').on('change', function () {
@@ -1442,6 +1457,7 @@ function bindUI() {
         setSnapshots(chatId, []);
         updateOverlayContent(chatId);
         clearGenStats();
+        refreshExtensionPrompt();
         toastr.info('Tracker state cleared for this chat.');
     });
 }
@@ -1512,55 +1528,10 @@ jQuery(async () => {
         console.warn('[enaennTracker] event_types.WORLDINFO_USED not found — using fallback event name "worldinfo_used"');
     }
     
-    // ─── Context injection (tracker state → main chat AI only) ────────────
-    eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
-        if (!S().enabled) return;
-        const chatId    = getChatId();
-        const injection = getInjectionText(chatId);
-        if (!injection) return;
-
-        if (args && typeof args === 'object') {
-            if (args.prompt !== undefined) {
-                args.prompt += injection;
-            } else if (Array.isArray(args.messages)) {
-                let insertIdx = args.messages.length;
-                for (let i = args.messages.length - 1; i >= 0; i--) {
-                    if (args.messages[i].role === 'user') { insertIdx = i; break; }
-                }
-                args.messages.splice(insertIdx, 0, { role: 'system', content: injection.trim() });
-            }
-        }
-    });
-
-    // ─── ISSUE 1 FIX: Context Injection ─────────────────────────────────────
-    // Registers the tracker state to be injected before the chat history
-    if (typeof extension_prompts !== 'undefined') {
-        extension_prompts.push({
-            identifier: TRACKER_FLAG,
-            source: MODULE_NAME,
-            type: extension_prompt_types.IN_PROMPT,
-            role: extension_prompt_roles.SYSTEM,
-            position: 0, // '0' pushes it to the top, before chat messages
-            content: () => {
-                if (!S().enabled) return '';
-                return getInjectionText(getChatId());
-            }
-        });
-    } else {
-        // Fallback just in case you run an older ST version
-        eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
-            if (!S().enabled) return;
-            const injection = getInjectionText(getChatId());
-            if (!injection) return;
-            
-            if (args.prompt !== undefined) {
-                args.prompt = injection + '\n' + args.prompt;
-            } else if (Array.isArray(args.messages)) {
-                args.messages.unshift({ role: 'system', content: injection.trim() });
-            }
-        });
-    }
-
+    
+    // ─── Register tracker state as an extension prompt ─────────────────────
+    refreshExtensionPrompt();
+    
     // ─── ISSUE 2 FIX: World Info Caching ────────────────────────────────────
     // Listens for ST's World Info event to populate your cache
     eventSource.on(event_types.WORLD_INFO_ACTIVATED || 'world_info_activated', onWorldInfoUsed);
@@ -1582,6 +1553,7 @@ jQuery(async () => {
         clearGenStats();
         _wiCache = [];              // stale WI entries from previous chat are meaningless
         _wiCacheTimestamp = 0;
+        refreshExtensionPrompt();
         if (S().overlayVisible) toggleOverlay(true);
     });
 
