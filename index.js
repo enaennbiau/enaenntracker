@@ -28,6 +28,7 @@ const DEFAULT_SETTINGS = {
     autoUpdate:         true,
     contextMessages:    20,
     windowSize:         7,
+    trackerMaxTokens: 1500,
     overlayVisible:     true,
     trackerStates:      {},
 
@@ -749,7 +750,7 @@ async function generateWithQuickApi(userMessage) {
         { role: 'system', content: TRACKER_SYSTEM_PROMPT },
         { role: 'user',   content: userMessage },
     ];
-    return postQuickApi(messages, 700);
+    return postQuickApi(messages, S().trackerMaxTokens || 1500);
 }
 
 async function fetchQuickApiModels() {
@@ -993,7 +994,7 @@ async function callTrackerAPI(chatId) {
             return (await generateWithQuickApi(userMessage)) || null;
         }
         if (s.connectionProfile) {
-            return (await generateWithConnectionProfile(userMessage, 700)) || null;
+            return (await generateWithConnectionProfile(userMessage, s.trackerMaxTokens || 1500)) || null;;
         }
         const ctx       = getContext();
         const rawResult = await ctx.generateRaw({
@@ -1148,6 +1149,12 @@ const SETTINGS_HTML = `
         none of which count against this budget.
       </small>
 
+            <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
+        <label style="white-space:nowrap; min-width:175px;">Max response tokens:</label>
+        <input type="number" id="enaennTracker_maxTokens" min="200" max="8000" class="text_pole" style="width:90px;" />
+        <small style="opacity:0.6;">(tracker AI output limit)</small>
+      </div>
+
       <div id="enaennTracker_genStats" class="enaenn-gen-stats"></div>
 
       <hr />
@@ -1245,6 +1252,10 @@ function bindUI() {
         const chatId = getChatId();
         const snaps  = getSnapshots(chatId);
         if (snaps.length > v) setSnapshots(chatId, snaps.slice(-v));
+    $('#enaennTracker_maxTokens').on('change', function () {
+        const v = Math.max(200, parseInt(this.value) || 1500);
+        save({ maxTokens: v });
+        $(this).val(v);
     });
 
     // Context sources
@@ -1383,6 +1394,7 @@ jQuery(async () => {
     $('#enaennTracker_quickapiUrl').val(S().quickApiUrl);
     $('#enaennTracker_quickapiKey').val(S().quickApiKey);
     $('#enaennTracker_quickapiModelInput').val(S().quickApiModel);
+    $('#enaennTracker_maxTokens').val(S().maxTokens);
 
     bindUI();
     addToolbarButton();
@@ -1398,7 +1410,7 @@ jQuery(async () => {
     // Restore last-gen stats if we have them (they don't survive page reload
     // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
     if (S().lastGenTokensTotal !== null) {
-        updateGenStats(S().lastGenTokensTotal, S().lastGenTokensWI ?? 0, false);
+        updateGenStats(S().lastGenTokensTotal, S().lastGenTokens?? 0, false);
     }
 
     // ─── World Info cache hook ─────────────────────────────────────────────
@@ -1413,7 +1425,7 @@ jQuery(async () => {
         eventSource.on(fallback, onWorldInfoUsed);
         console.warn('[enaennTracker] event_types.WORLDINFO_USED not found — using fallback event name "worldinfo_used"');
     }
-
+    
     // ─── Context injection (tracker state → main chat AI only) ────────────
     eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
         if (!S().enabled) return;
