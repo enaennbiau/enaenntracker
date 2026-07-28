@@ -8,6 +8,9 @@ import {
     saveSettingsDebounced,
     chat,
     getRequestHeaders,
+    extension_prompts,
+    extension_prompt_roles,
+    extension_prompt_types
 } from '../../../../script.js';
 
 import {
@@ -1430,6 +1433,40 @@ jQuery(async () => {
             }
         }
     });
+
+    // ─── ISSUE 1 FIX: Context Injection ─────────────────────────────────────
+    // Registers the tracker state to be injected before the chat history
+    if (typeof extension_prompts !== 'undefined') {
+        extension_prompts.push({
+            identifier: TRACKER_FLAG,
+            source: MODULE_NAME,
+            type: extension_prompt_types.IN_PROMPT,
+            role: extension_prompt_roles.SYSTEM,
+            position: 0, // '0' pushes it to the top, before chat messages
+            content: () => {
+                if (!S().enabled) return '';
+                return getInjectionText(getChatId());
+            }
+        });
+    } else {
+        // Fallback just in case you run an older ST version
+        eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, (args) => {
+            if (!S().enabled) return;
+            const injection = getInjectionText(getChatId());
+            if (!injection) return;
+            
+            if (args.prompt !== undefined) {
+                args.prompt = injection + '\n' + args.prompt;
+            } else if (Array.isArray(args.messages)) {
+                args.messages.unshift({ role: 'system', content: injection.trim() });
+            }
+        });
+    }
+
+    // ─── ISSUE 2 FIX: World Info Caching ────────────────────────────────────
+    // Listens for ST's World Info event to populate your cache
+    eventSource.on(event_types.WORLD_INFO_ACTIVATED || 'world_info_activated', onWorldInfoUsed);
+});
 
     // ─── Auto-update after each reply ─────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
