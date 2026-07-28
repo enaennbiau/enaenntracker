@@ -1506,5 +1506,20 @@ jQuery(async () => {
         setTimeout(populateProfileDropdown, 500);
     });
 
+        // TEMP DIAGNOSTIC — remove after testing
+    setTimeout(() => {
+        const o = document.getElementById('enaenn-overlay');
+        if (!o) { toastr.error('enaenn: overlay element MISSING'); return; }
+        const r  = o.getBoundingClientRect();
+        const cs = getComputedStyle(o);
+        toastr.info(
+            `display=${cs.display} z=${cs.zIndex}<br>` +
+            `x=${Math.round(r.left)} y=${Math.round(r.top)}<br>` +
+            `w=${Math.round(r.width)} h=${Math.round(r.height)}<br>` +
+            `viewport=${window.innerWidth}x${window.innerHeight}`,
+            'enaenn debug', { timeOut: 20000, escapeHtml: false }
+        );
+    }, 2500);
+
     console.log('[enaennTracker] Loaded successfully.');
 });
