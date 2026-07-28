@@ -8,12 +8,12 @@ import {
     saveSettingsDebounced,
     chat,
     getRequestHeaders,
+    setExtensionPrompt,
 } from '../../../../script.js';
 
 import {
     extension_settings,
     getContext,
-    setExtensionPrompt,
 } from '../../../extensions.js';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
