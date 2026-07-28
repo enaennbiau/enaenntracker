@@ -1466,7 +1466,6 @@ jQuery(async () => {
     // ─── ISSUE 2 FIX: World Info Caching ────────────────────────────────────
     // Listens for ST's World Info event to populate your cache
     eventSource.on(event_types.WORLD_INFO_ACTIVATED || 'world_info_activated', onWorldInfoUsed);
-    });
 
     // ─── Auto-update after each reply ─────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
