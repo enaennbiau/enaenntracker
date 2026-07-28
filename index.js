@@ -129,7 +129,7 @@ STEP 4 — OUTPUT FORMAT (plain text only)
 
 Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields separated by " | ".
 
-LOC: [1–2 sentence location and spatial description]
+LOC: [1–2 sentence spatial positions for each agent ({{user}} is not an agent!)]
 
 [One AGENT line per agent physically present in the scene — never the user. Omit all AGENT lines if user is alone.]
 AGENT: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
@@ -154,7 +154,6 @@ EXAMPLE OUTPUT:
 LOC: Ena stands in the doorway of her dorm room. The courier waits in the hallway with a tablet.
 AGENT: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68 | 82 | 91 | 32 | 44 | 2 | 18 | — | — | — | — | — | — | — | Complete delivery efficiently | -
 REL: Rune | 648 | Confused Fascination | + | 8 months | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity | 60 | 😐 | Reluctant Respect | 53 | 😤 | Frustrated Arousal | 38 | - | - | -
-REL: Clara | 295 | Interested Amiability | + | 8 months | Acquaintances | 😊 | Curious | 58 | 😊 | Friendly | 34 | - | - | - | - | - | -
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
