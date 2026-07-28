@@ -644,12 +644,23 @@ function updateOverlayContent(chatId) {
         : '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
 }
 
-// ─── CONTEXT INJECTION (tracker state → main chat AI only) ────────────
+// ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
+// NOTE: Only the compact tracker state (LOC/AGENT/REL/etc.) is ever injected
+// into the main chat context. Character description and world info are sent
+// exclusively to the tracker's own API call and never reach the chat AI.
+
+function getInjectionText(chatId) {
+    const snap = getCurrentSnapshot(chatId);
+    if (!snap) return '';
+    return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
+}
+
 // setExtensionPrompt is ST's official API for injecting text into the
 // assembled prompt. Position 1 = after system prompt, before chat history.
 // depth 0 = as close to the current message as possible (before last user msg).
-// We call it once on init and then refresh it every time the snapshot changes.
-
+// We call it once on init and then refresh it every time the snapshot changes,
+// rather than relying on the GENERATE_AFTER_COMBINE_PROMPTS event args (whose
+// shape isn't reliable across ST versions).
 const INJECTION_KEY = 'enaennTracker_state';
 
 function refreshInjection() {
@@ -657,16 +668,13 @@ function refreshInjection() {
         setExtensionPrompt(INJECTION_KEY, '', 1, 0);
         return;
     }
-    const chatId = getChatId();
-    const snap   = getCurrentSnapshot(chatId);
-    if (!snap) {
+    const chatId    = getChatId();
+    const injection = getInjectionText(chatId);
+    if (!injection) {
         setExtensionPrompt(INJECTION_KEY, '', 1, 0);
         return;
     }
-    const text = `[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]`;
-    // Position 1 = after system prompt / before chat history
-    // depth 0 = injected closest to the current generation point
-    setExtensionPrompt(INJECTION_KEY, text, 1, 0);
+    setExtensionPrompt(INJECTION_KEY, injection.trim(), 1, 0);
 }
 
 // ─── BUILD TRACKER PROMPT ─────────────────────────────────────────────────────
@@ -1251,10 +1259,7 @@ const SETTINGS_HTML = `
 // ─── BIND UI ──────────────────────────────────────────────────────────────────
 
 function bindUI() {
-    $('#enaennTracker_enabled').on('change',    function () {
-        save({ enabled: this.checked });
-        refreshInjection();
-    });
+    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); refreshInjection(); });
     $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
     $('#enaennTracker_ctxSize').on('change',    function () { save({ contextMessages: Math.max(5,  parseInt(this.value) || 20) }); });
     $('#enaennTracker_windowSize').on('change', function () {
@@ -1432,6 +1437,13 @@ jQuery(async () => {
         eventSource.on(fallback, onWorldInfoUsed);
         console.warn('[enaennTracker] event_types.WORLDINFO_USED not found — using fallback event name "worldinfo_used"');
     }
+
+    // ─── Context injection (tracker state → main chat AI only) ────────────
+    // Handled via setExtensionPrompt (see refreshInjection()), which is called
+    // on init, on chat change, whenever a snapshot is saved/restored, and when
+    // the enabled toggle changes. ST reads from its extension-prompt registry
+    // during prompt assembly, so there's no dependency on GENERATE_AFTER_COMBINE_PROMPTS
+    // event args (whose shape proved unreliable — args was undefined at fire time).
 
     // ─── Auto-update after each reply ─────────────────────────────────────
     eventSource.on(event_types.MESSAGE_RECEIVED, async () => {
