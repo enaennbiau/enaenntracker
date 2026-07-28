@@ -994,7 +994,7 @@ async function callTrackerAPI(chatId) {
             return (await generateWithQuickApi(userMessage)) || null;
         }
         if (s.connectionProfile) {
-            return (await generateWithConnectionProfile(userMessage, s.trackerMaxTokens || 1500)) || null;;
+            return (await generateWithConnectionProfile(userMessage, s.trackerMaxTokens || 1500)) || null;
         }
         const ctx       = getContext();
         const rawResult = await ctx.generateRaw({
@@ -1252,9 +1252,11 @@ function bindUI() {
         const chatId = getChatId();
         const snaps  = getSnapshots(chatId);
         if (snaps.length > v) setSnapshots(chatId, snaps.slice(-v));
+    });
+    
     $('#enaennTracker_maxTokens').on('change', function () {
         const v = Math.max(200, parseInt(this.value) || 1500);
-        save({ maxTokens: v });
+        save({ trackerMaxTokens: v });
         $(this).val(v);
     });
 
@@ -1394,7 +1396,7 @@ jQuery(async () => {
     $('#enaennTracker_quickapiUrl').val(S().quickApiUrl);
     $('#enaennTracker_quickapiKey').val(S().quickApiKey);
     $('#enaennTracker_quickapiModelInput').val(S().quickApiModel);
-    $('#enaennTracker_maxTokens').val(S().maxTokens);
+    $('#enaennTracker_maxTokens').val(S().trackerMaxTokens);
 
     bindUI();
     addToolbarButton();
@@ -1410,7 +1412,7 @@ jQuery(async () => {
     // Restore last-gen stats if we have them (they don't survive page reload
     // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
     if (S().lastGenTokensTotal !== null) {
-        updateGenStats(S().lastGenTokensTotal, S().lastGenTokens?? 0, false);
+        updateGenStats(S().lastGenTokensTotal, S().lastGenTokensWI ?? 0, false);
     }
 
     // ─── World Info cache hook ─────────────────────────────────────────────
