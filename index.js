@@ -764,14 +764,25 @@ function refreshExtensionPrompt() {
 function buildTrackerPrompt(chatId) {
     const s = S();
 
-    // 1. Recent chat messages (already limited by contextMessages setting)
+    // 1. Recent chat messages (already limited by contextMessages setting).
+    //    The newest message (the one that just fired MESSAGE_RECEIVED and
+    //    triggered this update) is split off — it's not part of the general
+    //    history block, it's the delta the tracker is meant to react to, so
+    //    it gets placed after the previous state instead (see step 5).
     const recentRoleplay = chat
         .filter(m => !m.extra?.[TRACKER_FLAG])
         .slice(-(s.contextMessages || 20));
 
-    const chatText = recentRoleplay
+    const historyMessages = recentRoleplay.slice(0, -1);
+    const newestMessage    = recentRoleplay[recentRoleplay.length - 1] || null;
+
+    const chatText = historyMessages
         .map(m => `${m.name || (m.is_user ? 'User' : 'Character')}: ${m.mes || ''}`)
         .join('\n\n');
+
+    const newestBlock = newestMessage
+        ? `NEWEST MESSAGE (update your state from this):\n${newestMessage.name || (newestMessage.is_user ? 'User' : 'Character')}: ${newestMessage.mes || ''}`
+        : '';
 
     // 2. Previous tracker state
     const prevSnap  = getCurrentSnapshot(chatId);
@@ -802,12 +813,14 @@ function buildTrackerPrompt(chatId) {
 
     // 5. Assemble in the agreed order:
     //    [system prompt is passed separately]
-    //    char description → world info → chat history → previous state → instruction
+    //    char description → world info → chat history (minus newest) →
+    //    previous state → newest message → instruction
     const assembled =
         charBlock +
         wiBlock +
-        `RECENT ROLEPLAY (${recentRoleplay.length} messages):\n${chatText}\n\n---\n\n` +
+        `RECENT ROLEPLAY (${historyMessages.length} messages):\n${chatText}\n\n---\n\n` +
         `${prevState}\n\n---\n\n` +
+        (newestBlock ? `${newestBlock}\n\n---\n\n` : '') +
         `Output the updated tracker data in the exact plain-text format specified. Nothing else.`;
 
     // 6. Compute rough total token estimate for the stats display
