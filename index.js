@@ -432,8 +432,20 @@ function buildTrackerHTML(data) {
 
 // ─── FORMAT TRACKER FOR CONTEXT ───────────────────────────────────────────────
 
+// Strips the tracker's own internal bookkeeping annotation — e.g.
+// "648 limit for 18, May: 12/20" — that STEP 3 of the system prompt has the
+// model append to the Main feeling value so the TRACKER can enforce the
+// +20/day relationship cap across turns. This annotation is meaningless to
+// the Main API (it's not roleplay content, just the tracker's own daily
+// counter) and must never reach it. It must, however, survive untouched in
+// the raw text that gets fed back into buildTrackerPrompt() as the previous
+// state, since that's the only way the tracker remembers the running count.
+function stripDailyLimitAnnotation(text) {
+    return text.replace(/\s*limit for[^|]*?:\s*-?\d+(?:\.\d+)?\s*\/\s*20/gi, '');
+}
+
 function formatTrackerForContext(raw) {
-    return raw.split('\n').map(line => {
+    return stripDailyLimitAnnotation(raw).split('\n').map(line => {
         const t = line.trim();
         if (!t) return line;
         if (t.startsWith('AGENT:')) {
