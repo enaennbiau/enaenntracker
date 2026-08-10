@@ -65,7 +65,7 @@ STRICT OUTPUT RULES
 ════════════════════════════════════
 STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
 ════════════════════════════════════
-Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last scenes. Write your estimate mentally (e.g. "~25 minutes passed"). Strictly AVOID lazily subtracting 1% per turn — use the actual rates below scaled to the elapsed time.
+Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last messages that have the time in it. Write your estimate mentally (e.g. "~25 minutes passed"). Use the actual rates below, and calculate it accordingly to the elapsed time between two last. Strictly AVOID lazily subtracting 1% per turn.
 
 ════════════════════════════════════
 STEP 2 — VITAL CALCULATION RULES
@@ -89,6 +89,7 @@ RATES — scale these by your Step 1 time estimate. These are NOT "per turn" val
 🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs. Halted during active stressors. Agent coping mechanisms may modify rate. 🧠 increases from unmet needs, social friction, danger, or active 🩹 conditions. High stress affects all "In The Moment" feelings and accelerates decay of 😴. 
 🔥  builds +2–8% per 5 min with sexual stimulus. Decays ~−0.5% per 5 min without. Modified by psychological engagement, comfort, sensitivity. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. IMPORTANT: values past 100% reserved for sexual activity only. Reaching 200% triggers climax. 
 
+Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
 Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).
 
@@ -164,8 +165,8 @@ PLAN: [date] | [description]
 
 EXAMPLE OUTPUT:
 LOC: Ena stands in the doorway of her dorm room. The courier waits in the hallway with a tablet.
-AGENT: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68 | 82 | 91 | 32 | 44 | 2 | 18 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-REL: Rune | 648 | Confused Fascination | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity | 60 | 😐 | Reluctant Respect | 53 | 😤 | Frustrated Arousal | 38 | - | - | -
+AGENT: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
+REL: Rune | 648 | Confused Fascination | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity | 60 (-3) | 😐 | Reluctant Respect | 53 (+2) | 😤 | Frustrated Arousal | 38 (+20) | - | - | -
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
