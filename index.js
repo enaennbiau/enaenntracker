@@ -71,7 +71,7 @@ Before touching any numbers, read the recent roleplay and estimate how much in-g
 STEP 2 - SORT AGENTS BY THEIR PRESENCE
 ════════════════════════════════════
 Track which agents are present right now in the scene. 
-Move those who used to be present ('ONSCREEN' label) into OFF-SCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move those who used to be OFF-SCREEN under ONSCREEN label when they are present again.
+Move those who used to be ONSCREEN into OFFSCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move OFFSCREEN to ONSCREEN if they participate in current scene.
 
 ════════════════════════════════════
 STEP 3 — VITAL CALCULATION RULES
@@ -98,10 +98,9 @@ RATES — scale these by your Step 1 time estimate. These are NOT "per turn" val
 Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
 Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).
-For off-screen agents track vitals approximately, using the labels from the template. When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.
+For off-screen agents track vitals approximately, using the labels from the template in STEP 5. When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.
 
 🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show only when there are active conditions.
-
 
 ════════════════════════════════════
 STEP 4 — RELATIONSHIP RULES
@@ -154,19 +153,19 @@ Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields 
 
 LOC: [1–2 sentence spatial positions for each agent ({{user}} is not an agent!)]
 
-[One ONSCREEN line per agent physically present in the scene — never the user. Omit all ONSCREEN lines if user is alone.]
+[One ONSCREEN line per agent physically present in the scene — never the user. Omit all ONSCREEN lines if user is alone. Move ONSCREEN to OFFSCREEN if agent is no longer in the scene. Convert vitals accordingly to STEP 3 guidelines.]
 ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
 
   Vital values: integers 0–100 (arousal 0–200).
   Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
   Condition: concise text and its effect, or - if none.
 
-[One REL line per tracked agent — on-screen AND off-screen. Always output these accordingly to the rules in STEP 4.]
+[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago - the relationship IS NOT CONSIDERED ACTIVE AND MUST BE OMITTED) — whether they're on-screen or off-screen. Always output these accordingly to the rules in STEP 4.]
 REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name + value change] | [itm1 0–100] | [e2] | [itm2 name + value change] | [itm2 0–100] | [e3] | [itm3 name + value change] | [itm3 0–100] | [e4] | [itm4 name + value change] | [itm4 0–100]
   Fewer than 4 ITM feelings: fill remaining slots with: - | - | -
   Feeling names: as the agent would personally describe them.
 
-[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.]
+[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story. Move OFFSCREEN to ONSCREEN if agent participates in the current scene. Convert vitals accordingly to STEP 3 guidelines.]
 OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse]
   Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm
 
