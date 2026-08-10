@@ -71,7 +71,7 @@ Before touching any numbers, read the recent roleplay and estimate how much in-g
 STEP 2 - SORT AGENTS BY THEIR PRESENCE
 ════════════════════════════════════
 Track which agents are present right now in the scene. 
-Move those who used to be on-screen into OFF-SCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move those who used to be OFF-SCREEN to on-screen when they are present again.
+Move those who used to be present ('AGENT' label) into OFF-SCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move those who used to be OFF-SCREEN under AGENT label when they are present again.
 
 ════════════════════════════════════
 STEP 3 — VITAL CALCULATION RULES
