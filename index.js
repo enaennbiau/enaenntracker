@@ -112,11 +112,11 @@ STEP 3 — RELATIONSHIP RULES
 ► STANDARD RULES: 
 Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
   ON-SCREEN AGENTS (physically in the current scene):
-  Main feeling (0–1000): develops slowly. Max +20 pts/in-game day unless a major positive event occurs. Track the amount by adding "limit for [DD, MM]: value/20" after the Main feeling value.
+  Main feeling (0–1000) shows what an agent thinks and feels toward {{user}} OVERALL. Develops SLOWLY. IT IS NOT VOLATILE! Max +/-20 pts/in-game day unless a major positive/negative event occurs. Track the amount by adding "limit for [DD, MM]: value/20; -value/-20" after the Main feeling value.
     VALENCE: the feeling NAME determines whether it is positive or negative — output "+" for positive feelings, "-" for negative. The scale is always 0–1000.
     At 1000 → transforms into a STRONGER positive version of the same valence (positive → deeper positive; negative softens toward neutrality or slight positive).
     At 0 → transforms into a WEAKER / more neutral / negative version moving toward the opposite valence (for example, positive → indifference → negative).
-  In The Moment feelings (0–100, max 4 feelings per agent): reflect what is happening right now in the scene.
+  In The Moment feelings (0–100, max 4 feelings per agent) reflect what is happening RIGHT NOW IN THIS CURRENT MOMENT.
     Dissipate ONLY when the specific event or mood that caused them has clearly ended within the scene.
     At 100 → intensifies into a stronger successor of the same valence.
     At 0 → dissolves into a milder predecessor or fades entirely.
