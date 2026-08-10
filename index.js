@@ -71,7 +71,7 @@ Before touching any numbers, read the recent roleplay and estimate how much in-g
 STEP 2 - SORT AGENTS BY THEIR PRESENCE
 ════════════════════════════════════
 Track which agents are present right now in the scene. 
-Move those who used to be present ('AGENT' label) into OFF-SCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move those who used to be OFF-SCREEN under AGENT label when they are present again.
+Move those who used to be present ('ONSCREEN' label) into OFF-SCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move those who used to be OFF-SCREEN under ONSCREEN label when they are present again.
 
 ════════════════════════════════════
 STEP 3 — VITAL CALCULATION RULES
@@ -154,8 +154,8 @@ Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields 
 
 LOC: [1–2 sentence spatial positions for each agent ({{user}} is not an agent!)]
 
-[One AGENT line per agent physically present in the scene — never the user. Omit all AGENT lines if user is alone.]
-AGENT: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
+[One ONSCREEN line per agent physically present in the scene — never the user. Omit all ONSCREEN lines if user is alone.]
+ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
 
   Vital values: integers 0–100 (arousal 0–200).
   Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
@@ -175,8 +175,8 @@ PLAN: [date] | [description]
 
 EXAMPLE OUTPUT:
 LOC: Ena stands in the doorway of her dorm room. The courier waits in the hallway with a tablet.
-AGENT: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-AGENT: ♂️ | Rune | Black turtleneck, dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Get her back into the bed | —
+ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
+ONSCREEN: ♂️ | Rune | Black turtleneck, dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Get her back into the bed | —
 REL: Rune | 648 | Confused Fascination (0) | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity (+2) | 60 | 😐 | Reluctant Respect (-2) | 53  | 😤 | Frustrated Arousal (+3)| 38 | - | - | -
 OFFSCREEN: ♂️ | Kilian | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
@@ -366,8 +366,8 @@ function parseTrackerData(text) {
         const p = (prefix) => line.slice(prefix.length).split('|').map(s => s.trim());
         if (line.startsWith('LOC:')) {
             data.location = line.slice(4).trim();
-        } else if (line.startsWith('AGENT:')) {
-            const f = p('AGENT:');
+        } else if (line.startsWith('ONSCREEN:')) {
+            const f = p('ONSCREEN:');
             if (f.length < 19) continue;
             data.agents.push({
                 gender: f[0], name: f[1], attire: f[2],
@@ -461,8 +461,8 @@ function formatTrackerForContext(raw) {
     return stripDailyLimitAnnotation(raw).split('\n').map(line => {
         const t = line.trim();
         if (!t) return line;
-        if (t.startsWith('AGENT:')) {
-            const parts = t.slice('AGENT:'.length).split('|').map(s => s.trim());
+        if (t.startsWith('ONSCREEN:')) {
+            const parts = t.slice('ONSCREEN:'.length).split('|').map(s => s.trim());
             if (parts.length < 19) return line;
             const vt = VITAL_META.map(m => m.text);
             for (let i = 0; i < 7; i++) {
@@ -471,7 +471,7 @@ function formatTrackerForContext(raw) {
                 parts[3 + i]  = `${vt[i]}:${rawVal}`;
                 parts[10 + i] = `Δ${vt[i]}:${rawDel}`;
             }
-            return 'AGENT: ' + parts.join(' | ');
+            return 'ONSCREEN: ' + parts.join(' | ');
         }
         if (t.startsWith('REL:')) return 'RELATIONSHIP:' + t.slice('REL:'.length);
         if (t.startsWith('OFFSCREEN:')) {
@@ -750,7 +750,7 @@ function updateOverlayContent(chatId) {
 }
 
 // ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
-// NOTE: Only the compact tracker state (LOC/AGENT/REL/etc.) is ever injected
+// NOTE: Only the compact tracker state (LOC/ONSCREEN/REL/etc.) is ever injected
 // into the main chat context. Character description and world info are sent
 // exclusively to the tracker's own API call and never reach the chat AI.
 
