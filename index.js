@@ -72,10 +72,10 @@ STEP 2 — VITAL CALCULATION RULES
 ════════════════════════════════════
 
 LOW-critical vitals (🍴 food/satiation, 😴 energy, 🚿 hygiene) — low values are bad:
-  Output integers 0–100. Severity reference: ≥50% = ok; 25–49% = warn; <25% = critical.
+  Output integers 0–100. Severity reference: ≥50% = ok; 25.1–29.9% = warn; <25% = critical.
 
 HIGH-critical vitals (💧 thirst, 🚽 bladder, 🧠 stress) — high values are bad:
-  Output integers 0–100. Severity reference: ≤50% = ok; 51–74% = warn; ≥75% = critical.
+  Output integers 0–100. Severity reference: ≤50% = ok; 70–74.9% = warn; ≥75% = critical.
 
 🔥 Arousal (0–200%) — output actual integer value.
 
@@ -148,11 +148,11 @@ LOC: [1–2 sentence spatial positions for each agent ({{user}} is not an agent!
 AGENT: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
 
   Vital values: integers 0–100 (arousal 0–200).
-  Delta format: +N or -N (e.g. +2.4 or -1.8). First snapshot: —
+  Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
   Condition: concise text and its effect, or - if none.
 
 [One REL line per ALL tracked agents — on-screen AND off-screen. Always output these. Copy off-screen values VERBATIM from previous state.]
-REL: [Name] | [main 0–1000] | [main feeling name] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name] | [itm1 0–100] | [e2] | [itm2 name] | [itm2 0–100] | [e3] | [itm3 name] | [itm3 0–100] | [e4] | [itm4 name] | [itm4 0–100]
+REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name + value change] | [itm1 0–100] | [e2] | [itm2 name + value change] | [itm2 0–100] | [e3] | [itm3 name + value change] | [itm3 0–100] | [e4] | [itm4 name + value change] | [itm4 0–100]
   Fewer than 4 ITM feelings: fill remaining slots with: - | - | -
   Feeling names: as the agent would personally describe them.
 
@@ -166,7 +166,7 @@ PLAN: [date] | [description]
 EXAMPLE OUTPUT:
 LOC: Ena stands in the doorway of her dorm room. The courier waits in the hallway with a tablet.
 AGENT: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-REL: Rune | 648 | Confused Fascination | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity | 60 (-3) | 😐 | Reluctant Respect | 53 (+2) | 😤 | Frustrated Arousal | 38 (+20) | - | - | -
+REL: Rune | 648 | Confused Fascination (0) | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity (+2) | 60 | 😐 | Reluctant Respect (-2) | 53  | 😤 | Frustrated Arousal (+3)| 38 | - | - | -
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
