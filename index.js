@@ -1541,19 +1541,7 @@ jQuery(async () => {
         updateGenStats(S().lastGenTokensTotal, S().lastGenTokensWI ?? 0, false);
     }
 
-    // ─── World Info cache hook ─────────────────────────────────────────────
-    // ST fires WORLDINFO_USED during its own prompt assembly (i.e. when the
-    // chat AI is about to generate). We cache the active entries here so the
-    // tracker can use them at the next generation without re-scanning itself.
-    if (event_types.WORLDINFO_USED) {
-        eventSource.on(event_types.WORLDINFO_USED, onWorldInfoUsed);
-    } else {
-        // Older ST versions used a different event name
-        const fallback = 'worldinfo_used';
-        eventSource.on(fallback, onWorldInfoUsed);
-        console.warn('[enaennTracker] event_types.WORLDINFO_USED not found — using fallback event name "worldinfo_used"');
-    }
-    
+  
     
     // ─── Register tracker state as an extension prompt ─────────────────────
     refreshExtensionPrompt();
