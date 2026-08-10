@@ -165,7 +165,7 @@ PLAN: [date] | [description]
 EXAMPLE OUTPUT:
 LOC: Ena stands in the doorway of her dorm room. The courier waits in the hallway with a tablet.
 AGENT: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68 | 82 | 91 | 32 | 44 | 2 | 18 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-REL: Rune | 648 | Confused Fascination | + | Known for: 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity | 60 | 😐 | Reluctant Respect | 53 | 😤 | Frustrated Arousal | 38 | - | - | -
+REL: Rune | 648 | Confused Fascination | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity | 60 | 😐 | Reluctant Respect | 53 | 😤 | Frustrated Arousal | 38 | - | - | -
 OFFSCREEN: ♂️ | Rune | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
 PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
 
