@@ -173,12 +173,13 @@ OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energ
 PLAN: [date] | [description]
 
 EXAMPLE OUTPUT:
-LOC: Ena stands in the doorway of her dorm room. The courier waits in the hallway with a tablet.
+LOC: Lilo stands in the doorway of her dorm room. The courier waits in the hallway with a tablet. Kevin is splayed on her bed.
 ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-ONSCREEN: ♂️ | Rune | Black turtleneck, dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Get her back into the bed | —
-REL: Rune | 648 | Confused Fascination (0) | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Transactional Phase | 😑 | Amused Curiosity (+2) | 60 | 😐 | Reluctant Respect (-2) | 53  | 😤 | Frustrated Arousal (+3)| 38 | - | - | -
-OFFSCREEN: ♂️ | Kilian | Old Quarters penthouse | Having late lunch with Kyren | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal.
-PLAN: 18 May | Rune's gallery opening — Ena invited by Clara`;
+ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Get her back into the bed | —
+REL: Kevin | 648 | Confused Fascination (0) | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Sexually Charged Phase | 😑 | Amused Curiosity (+2) | 60 | 😐 | Reluctant Respect (-2) | 53  | 😤 | Frustrated Arousal (+3)| 38 | - | - | -
+REL: Caleb | 347 | Suppressed Longing (0) | + | 20 years (since birth) | Childhood Friends — Forbidden Love Phase | 🥺 | Need To Reach Out (+2) | 78 | - | - | -  | - | - | - | - | - | -
+OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal. Don't think about her.
+PLAN: 18 May | Caleb's gallery opening — Lilo invited by Lysa`;
 
 // ─── VITAL METADATA & HELPERS ─────────────────────────────────────────────────
 
