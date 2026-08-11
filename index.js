@@ -765,8 +765,8 @@ function refreshExtensionPrompt() {
     setExtensionPrompt(
         TRACKER_FLAG,
         text,
-        extension_prompt_types.IN_PROMPT,   // where in the prompt
-        0,                                  // depth (0 = top / before chat)
+        extension_prompt_types.IN_CHAT,     // in-chat, not top-of-prompt
+        1,                                  // depth 1 = before the last message
         false,                              // scan (WI trigger) — no
         extension_prompt_roles.SYSTEM,      // role
     );
