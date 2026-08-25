@@ -38,6 +38,17 @@ const DEFAULT_SETTINGS = {
     useWorldInfo:       true,          // inject active WI entries into tracker prompt
     wiTokenLimit:       8000,          // max tokens for WI block (0 = unlimited)
 
+    // ─── Tracked categories (optional "tabs") ─────────────────────────────
+    // Turning one of these off stops the tracker AI from tracking/generating
+    // that category at all (saves tokens), hides its tab in the overlay, and
+    // excludes it from the text injected into the main chat API.
+    trackOnscreen:      true,          // ONSCREEN agents (present in the scene)
+    trackRelationships: true,          // REL relationship tracking
+    trackOffscreen:     true,          // OFFSCREEN agents (not in the scene)
+
+    // ─── Local backup (survives Enabled being switched off) ───────────────
+    lastLocalBackupAt:  null,
+
     // ─── Last-generation stats (display only, not persisted across sessions) ─
     lastGenTokensTotal: null,
     lastGenTokensWI:    null,
@@ -52,28 +63,58 @@ const DEFAULT_SETTINGS = {
 
 // ─── TRACKER SYSTEM PROMPT ───────────────────────────────────────────────────
 
-const TRACKER_SYSTEM_PROMPT = `You are a meticulous silent background tracker for a collaborative simulation. Your job is to track the state of agents ({{char}}, side agents, and significant NPCs). Read the previous tracker state and recent narration, calculate elapsed in-simulation time between the latest messages, and update tracker state block in plain-text format. Be precise about the vital calculations — think deeply and carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.
+function buildTrackerSystemPrompt(s) {
+    s = s || S();
+    const trackOnscreen      = s.trackOnscreen      !== false;
+    const trackOffscreen     = s.trackOffscreen     !== false;
+    const trackRelationships = s.trackRelationships !== false;
+    const trackAnyAgents     = trackOnscreen || trackOffscreen;
 
-════════════════════════════════════
+    const parts = [];
+
+    // ── Header ──────────────────────────────────────────────────────────
+    parts.push(`You are a meticulous silent background tracker for a collaborative simulation. Your job is to track ${trackAnyAgents ? 'the state of agents ({{char}}, side agents, and significant NPCs)' : 'simulation state such as location and pacing'}. Read the previous tracker state and recent narration, calculate elapsed in-simulation time between the latest messages, and update tracker state block in plain-text format. Be precise about the vital calculations — think deeply and carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.`);
+
+    // ── Strict output rules ─────────────────────────────────────────────
+    let strict = `════════════════════════════════════
 STRICT OUTPUT RULES
 ════════════════════════════════════
 - Calculate and update previous tracker state values based on the current scene and STEPS described lower.
-- Output only the plain-text data lines defined in STEP 4. No HTML. No markdown. No code fences. No commentary.
-- Never include user/{{user}} as an agent. USER IS NOT AN AGENT. Track {{char}}, side characters, and significant NPCs only.
-- If no previous tracker state exists, initialize all values fresh from chat context.
+- Output only the plain-text data lines defined in the OUTPUT FORMAT step. No HTML. No markdown. No code fences. No commentary.`;
+    if (trackAnyAgents) {
+        strict += `\n- Never include user/{{user}} as an agent. USER IS NOT AN AGENT. Track {{char}}, side characters, and significant NPCs only.`;
+    }
+    strict += `\n- If no previous tracker state exists, initialize all values fresh from chat context.`;
+    parts.push(strict);
 
-════════════════════════════════════
+    // ── STEP 1 — time ───────────────────────────────────────────────────
+    parts.push(`════════════════════════════════════
 STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
 ════════════════════════════════════
-Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last messages that have the time in it. Write your estimate mentally (e.g. "~25 minutes passed"). Use the actual rates below, and calculate it accordingly to the elapsed time between two last. Strictly AVOID lazily subtracting 1% per turn.
+Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last messages that have the time in it. Write your estimate mentally (e.g. "~25 minutes passed"). Use the actual rates below, and calculate it accordingly to the elapsed time between two last. Strictly AVOID lazily subtracting 1% per turn.`);
 
-════════════════════════════════════
+    // ── STEP 2 — presence sorting ───────────────────────────────────────
+    if (trackOnscreen && trackOffscreen) {
+        parts.push(`════════════════════════════════════
 STEP 2 - SORT AGENTS BY THEIR PRESENCE
 ════════════════════════════════════
 Track which agents are present right now in the scene. 
-Move those who used to be ONSCREEN into OFFSCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move OFFSCREEN to ONSCREEN if they participate in current scene.
-
+Move those who used to be ONSCREEN into OFFSCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move OFFSCREEN to ONSCREEN if they participate in current scene.`);
+    } else if (trackOnscreen) {
+        parts.push(`════════════════════════════════════
+STEP 2 - TRACK PRESENT AGENTS
 ════════════════════════════════════
+Track which agents are physically present right now in the scene. Off-screen agents are not tracked in this configuration — only report agents who are currently in the scene.`);
+    } else if (trackOffscreen) {
+        parts.push(`════════════════════════════════════
+STEP 2 - TRACK SIGNIFICANT AGENTS
+════════════════════════════════════
+On-screen presence tracking is disabled in this configuration. Track significant agents relevant to the story (their location, activity, and state) regardless of whether they are in the current scene.`);
+    }
+
+    // ── STEP 3 — vitals ─────────────────────────────────────────────────
+    if (trackOnscreen || trackOffscreen) {
+        let step3 = `════════════════════════════════════
 STEP 3 — VITAL CALCULATION RULES
 ════════════════════════════════════
 
@@ -97,12 +138,17 @@ RATES — scale these by your Step 1 time estimate. These are NOT "per turn" val
 
 Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
-Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).
-For off-screen agents track vitals approximately, using the labels from the template in STEP 5. When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.
+Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).`;
+        if (trackOffscreen) {
+            step3 += `\nFor off-screen agents track vitals approximately, using the labels from the template in the OUTPUT FORMAT step.${trackOnscreen ? ' When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.' : ''}`;
+        }
+        step3 += `\n\n🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show only when there are active conditions.`;
+        parts.push(step3);
+    }
 
-🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show only when there are active conditions.
-
-════════════════════════════════════
+    // ── STEP 4 — relationships ──────────────────────────────────────────
+    if (trackRelationships) {
+        let step4 = `════════════════════════════════════
 STEP 4 — RELATIONSHIP RULES
 ════════════════════════════════════
 
@@ -116,9 +162,16 @@ STEP 4 — RELATIONSHIP RULES
     - If the internal system names a feeling or relationship stage, use that name verbatim in your tracker.
   IF no such system is detected: apply the standard rules below as normal.
 
-► STANDARD RULES: 
+► STANDARD RULES: `;
+        if (trackOffscreen) {
+            step4 += `
 Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
-  ON-SCREEN AGENTS (physically in the current scene):
+  ON-SCREEN AGENTS (physically in the current scene):`;
+        } else {
+            step4 += `
+  RELATIONSHIP TRACKING:`;
+        }
+        step4 += `
   Main feeling (0–1000) shows what an agent thinks and feels toward {{user}} OVERALL. Develops SLOWLY. IT IS NOT VOLATILE! Max +/-20 pts/in-game day unless a major positive/negative event occurs. Track the amount by adding "limit for [DD, MM]: value/20; -value/-20" after the Main feeling value.
     VALENCE: the feeling NAME determines whether it is positive or negative — output "+" for positive feelings, "-" for negative. The scale is always 0–1000.
     At 1000 → transforms into a STRONGER positive version of the same valence (positive → deeper positive; negative softens toward neutrality or slight positive).
@@ -129,7 +182,10 @@ Apply DIFFERENT rules based strictly on whether the agent is physically present 
     At 0 → dissolves into a milder predecessor or fades entirely.
     Negative ITM transformation reaching 100 → deduct 1–20 from Main. Positive ITM transformation reaching 100 → add 1–20 to Main even if bypassing the daily limit. 
   Relationship stage: update only when warranted by scene events.
-  "Known for" duration: mention the date of first meeting - retrieve it from character sheet/world info. Track months/years, update accordingly to the current date.
+  "Known for" duration: mention the date of first meeting - retrieve it from character sheet/world info. Track months/years, update accordingly to the current date.`;
+
+        if (trackOffscreen) {
+            step4 += `
 
   OFF-SCREEN AGENTS (not physically in the current scene):
   HARD FREEZE FOR RELATIONSHIP — copy every value (Main AND all In The Moment feelings) EXACTLY
@@ -140,46 +196,85 @@ Apply DIFFERENT rules based strictly on whether the agent is physically present 
   - Do not apply transformation. 
   The ONLY exception: if the current roleplay messages contain an explicit interaction directly involving the off-screen agent (a letter arrives, a phone call, someone delivers specific news about {{user}}, etc) —
   apply only the single targeted change that event warrants, and nothing else.
-  Time passing alone is NEVER a reason to change an off-screen agent's relationship.
+  Time passing alone is NEVER a reason to change an off-screen agent's relationship.`;
+        }
+
+        step4 += `
 
 Choose ALL feeling names as the AGENT would personally describe them.
-Track personality-consistent behavior: e.g. an avoidant agent in sustained proximity → 🧠 +10–15/day.
+Track personality-consistent behavior: e.g. an avoidant agent in sustained proximity → 🧠 +10–15/day.`;
 
-════════════════════════════════════
-STEP 5 — OUTPUT FORMAT (plain text only)
+        parts.push(step4);
+    }
+
+    // ── OUTPUT FORMAT ───────────────────────────────────────────────────
+    let outFmt = `════════════════════════════════════
+OUTPUT FORMAT (plain text only)
 ════════════════════════════════════
 
 Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields separated by " | ".
 
-LOC: [1–2 sentence spatial positions for each agent ({{user}} is not an agent!)]
+LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for each agent ({{user}} is not an agent!)' : ' relevant to the scene'}]`;
 
-[One ONSCREEN line per agent physically present in the scene — never the user. Omit all ONSCREEN lines if user is alone. Move ONSCREEN to OFFSCREEN if agent is no longer in the scene. Convert vitals accordingly to STEP 3 guidelines.]
+    if (trackOnscreen) {
+        outFmt += `
+
+[One ONSCREEN line per agent physically present in the scene — never the user. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
 ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
 
   Vital values: integers 0–100 (arousal 0–200).
   Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
-  Condition: concise text and its effect, or - if none.
+  Condition: concise text and its effect, or - if none.`;
+    }
 
-[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago - the relationship IS NOT CONSIDERED ACTIVE AND MUST BE OMITTED) — whether they're on-screen or off-screen. Always output these accordingly to the rules in STEP 4.]
+    if (trackRelationships) {
+        outFmt += `
+
+[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago - the relationship IS NOT CONSIDERED ACTIVE AND MUST BE OMITTED)${trackOffscreen ? " — whether they're on-screen or off-screen" : ''}. Always output these accordingly to the rules in the RELATIONSHIP RULES step.]
 REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name + value change] | [itm1 0–100] | [e2] | [itm2 name + value change] | [itm2 0–100] | [e3] | [itm3 name + value change] | [itm3 0–100] | [e4] | [itm4 name + value change] | [itm4 0–100]
   Fewer than 4 ITM feelings: fill remaining slots with: - | - | -
-  Feeling names: as the agent would personally describe them.
+  Feeling names: as the agent would personally describe them.`;
+    }
 
-[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story. Move OFFSCREEN to ONSCREEN if agent participates in the current scene. Convert vitals accordingly to STEP 3 guidelines.]
+    if (trackOffscreen) {
+        outFmt += `
+
+[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.${trackOnscreen ? ' Move OFFSCREEN to ONSCREEN if agent participates in the current scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
 OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse]
-  Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm
+  Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm`;
+    }
+
+    outFmt += `
 
 [Only if upcoming plans exist:]
-PLAN: [date] | [description]
+PLAN: [date] | [description]`;
 
-EXAMPLE OUTPUT:
-LOC: {{user}} stands in the doorway of her dorm room. The courier waits in the hallway with a tablet. Kevin is splayed on her bed.
+    parts.push(outFmt);
+
+    // ── EXAMPLE OUTPUT ──────────────────────────────────────────────────
+    let example = `EXAMPLE OUTPUT:
+LOC: {{user}} stands in the doorway of her dorm room. The courier waits in the hallway with a tablet. Kevin is splayed on her bed.`;
+    if (trackOnscreen) {
+        example += `
 ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Wait for her to return into the bed | —
+ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Wait for her to return into the bed | —`;
+    }
+    if (trackRelationships) {
+        example += `
 REL: Kevin | 648 | Confused Fascination (0) | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Sexually Charged Phase | 😑 | Amused Curiosity (+2) | 60 | 😐 | Reluctant Respect (-2) | 53  | 😤 | Frustrated Arousal (+3)| 38 | - | - | -
-REL: Caleb | 347 | Suppressed Longing (0) | + | 20 years (since birth) | Childhood Friends — Forbidden Love Phase | 🥺 | Need To Reach Out (+2) | 78 | - | - | -  | - | - | - | - | - | -
-OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal. Don't think about her.
+REL: Caleb | 347 | Suppressed Longing (0) | + | 20 years (since birth) | Childhood Friends — Forbidden Love Phase | 🥺 | Need To Reach Out (+2) | 78 | - | - | -  | - | - | - | - | - | -`;
+    }
+    if (trackOffscreen) {
+        example += `
+OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal. Don't think about her.`;
+    }
+    example += `
 PLAN: 18 May | Caleb's gallery opening — {{user}} invited by Lysa`;
+
+    parts.push(example);
+
+    return parts.join('\n\n');
+}
 
 // ─── VITAL METADATA & HELPERS ─────────────────────────────────────────────────
 
@@ -419,28 +514,57 @@ function buildVitalsHTML(vitals) {
     }).join('\n');
 }
 
-function buildTrackerHTML(data) {
+function buildTrackerHTML(data, s) {
+    s = s || S();
+    const showOnscreen  = s.trackOnscreen      !== false;
+    const showRel       = s.trackRelationships !== false;
+    const showOffscreen = s.trackOffscreen     !== false;
+
     const uid  = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    const tab1 = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(a => {
-        const cond = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
-        return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals)}</div></details>${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
-    }).join('<div class="enaenn-agent-sep"></div>');
 
-    const tab2 = data.relationships.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relationships tracked yet.</div></div>' : data.relationships.map(r => {
-        const barClass = r.valence === '-' ? 'enaenn-rel-fill-neg' : 'enaenn-rel-fill';
-        const barWidth = Math.min((r.mainVal / 1000) * 100, 100).toFixed(1);
-        const itmHTML  = r.itm.map(f => `<div class="enaenn-rel-moment-row"><span>${esc(f.emoji)} ${esc(f.name)}</span><div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:${f.val}%"></div></div><span class="enaenn-rel-moment-val">${f.val}</span></div>`).join('');
-        return `<details class="enaenn-rel-fold"><summary><span class="enaenn-rel-fold-name">${esc(r.name)} → User</span><span class="enaenn-rel-fold-preview">${esc(r.mainName)} (${r.mainVal}/1000)</span></summary><div class="enaenn-rel-fold-body"><div class="enaenn-rel-main"><span>${esc(r.mainName)}</span><div class="enaenn-rel-bar-wrap"><div class="${barClass}" style="width:${barWidth}%"></div></div><span class="enaenn-rel-val">(${r.mainVal}/1000)</span></div><div class="enaenn-rel-moments">${itmHTML}</div><div class="enaenn-rel-stage">Known ${esc(r.duration)} · ${esc(r.stage)}</div></div></details>`;
-    }).join('');
+    const tabs = [];
 
-    const tab3 = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(a => {
-        const v = a.vitals;
-        return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div></div>`;
-    }).join('');
+    if (showOnscreen) {
+        const content = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(a => {
+            const cond = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
+            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals)}</div></details>${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
+        }).join('<div class="enaenn-agent-sep"></div>');
+        tabs.push({ label: '💖 Present', content });
+    }
+
+    if (showRel) {
+        const inner = data.relationships.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relationships tracked yet.</div></div>' : data.relationships.map(r => {
+            const barClass = r.valence === '-' ? 'enaenn-rel-fill-neg' : 'enaenn-rel-fill';
+            const barWidth = Math.min((r.mainVal / 1000) * 100, 100).toFixed(1);
+            const itmHTML  = r.itm.map(f => `<div class="enaenn-rel-moment-row"><span>${esc(f.emoji)} ${esc(f.name)}</span><div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:${f.val}%"></div></div><span class="enaenn-rel-moment-val">${f.val}</span></div>`).join('');
+            return `<details class="enaenn-rel-fold"><summary><span class="enaenn-rel-fold-name">${esc(r.name)} → User</span><span class="enaenn-rel-fold-preview">${esc(r.mainName)} (${r.mainVal}/1000)</span></summary><div class="enaenn-rel-fold-body"><div class="enaenn-rel-main"><span>${esc(r.mainName)}</span><div class="enaenn-rel-bar-wrap"><div class="${barClass}" style="width:${barWidth}%"></div></div><span class="enaenn-rel-val">(${r.mainVal}/1000)</span></div><div class="enaenn-rel-moments">${itmHTML}</div><div class="enaenn-rel-stage">Known ${esc(r.duration)} · ${esc(r.stage)}</div></div></details>`;
+        }).join('');
+        tabs.push({ label: '💕 Relations', content: `<div class="enaenn-rel-list">${inner}</div>` });
+    }
+
+    if (showOffscreen) {
+        const content = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(a => {
+            const v = a.vitals;
+            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div></div>`;
+        }).join('');
+        tabs.push({ label: '🌍 Off‑screen', content });
+    }
 
     const plans = data.plans.length === 0 ? '' : `<details class="enaenn-plans"><summary>📅 Future Plans</summary><div class="enaenn-plans-body">${data.plans.map(p => `<div class="enaenn-plan-row"><span class="enaenn-plan-date">${esc(p.date)}</span><span class="enaenn-plan-desc">${esc(p.desc)}</span></div>`).join('')}</div></details>`;
 
-    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}</div><div class="enaenn-tabs-box"><input type="radio" name="enaenn-${uid}" id="enaenn-t1-${uid}" checked><input type="radio" name="enaenn-${uid}" id="enaenn-t2-${uid}"><input type="radio" name="enaenn-${uid}" id="enaenn-t3-${uid}"><div class="enaenn-tab-labels"><label for="enaenn-t1-${uid}">💖 Present</label><label for="enaenn-t2-${uid}">💕 Relations</label><label for="enaenn-t3-${uid}">🌍 Off‑screen</label></div><div class="enaenn-tab-content"><div class="enaenn-tp1">${tab1}</div><div class="enaenn-tp2"><div class="enaenn-rel-list">${tab2}</div></div><div class="enaenn-tp3">${tab3}</div></div></div>${plans}</div>`;
+    let tabsHTML;
+    if (tabs.length > 1) {
+        const radios   = tabs.map((t, i) => `<input type="radio" name="enaenn-${uid}" id="enaenn-t${i + 1}-${uid}"${i === 0 ? ' checked' : ''}>`).join('');
+        const labels   = tabs.map((t, i) => `<label for="enaenn-t${i + 1}-${uid}">${t.label}</label>`).join('');
+        const contents = tabs.map((t, i) => `<div class="enaenn-tp${i + 1}">${t.content}</div>`).join('');
+        tabsHTML = `<div class="enaenn-tabs-box">${radios}<div class="enaenn-tab-labels">${labels}</div><div class="enaenn-tab-content">${contents}</div></div>`;
+    } else if (tabs.length === 1) {
+        tabsHTML = `<div class="enaenn-single-section">${tabs[0].content}</div>`;
+    } else {
+        tabsHTML = '<div class="enaenn-alone-msg">All tracked categories are turned off in settings.</div>';
+    }
+
+    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}</div>${tabsHTML}${plans}</div>`;
 }
 
 // ─── FORMAT TRACKER FOR CONTEXT ───────────────────────────────────────────────
@@ -526,11 +650,61 @@ function setSnapshots(chatId, snaps) {
     const states = S().trackerStates || {};
     states[chatId] = snaps;
     save({ trackerStates: states });
+    backupTrackerStateToLocalStorage(chatId, snaps);
 }
 
 function getCurrentSnapshot(chatId) {
     const snaps = getSnapshots(chatId);
     return snaps.length ? snaps[snaps.length - 1] : null;
+}
+
+// ─── LOCAL BACKUP (survives being switched off, page reloads, etc.) ───────────
+// extension_settings is only persisted to the server via a *debounced* save,
+// so there's a small window where data could theoretically be lost (e.g. the
+// tab closes right after a change, before the debounce timer fires). This
+// mirrors tracker snapshots into localStorage immediately and synchronously,
+// completely independent of that debounce, and can restore from it if the
+// live data for a chat is ever found empty.
+
+const LS_BACKUP_PREFIX = 'enaennTracker_backup_';
+
+function backupTrackerStateToLocalStorage(chatId, snaps) {
+    try {
+        snaps = snaps || getSnapshots(chatId);
+        if (!snaps || !snaps.length) return;
+        localStorage.setItem(LS_BACKUP_PREFIX + chatId, JSON.stringify({ snaps, ts: Date.now() }));
+        save({ lastLocalBackupAt: Date.now() });
+        updateBackupStatusUI();
+    } catch (e) {
+        console.warn('[enaennTracker] Local backup failed:', e);
+    }
+}
+
+function restoreTrackerStateFromLocalStorageIfNeeded(chatId) {
+    try {
+        if (getSnapshots(chatId).length) return false; // live data already present, nothing to do
+        const raw = localStorage.getItem(LS_BACKUP_PREFIX + chatId);
+        if (!raw) return false;
+        const backup = JSON.parse(raw);
+        if (!backup?.snaps?.length) return false;
+        const states = S().trackerStates || {};
+        states[chatId] = backup.snaps;
+        save({ trackerStates: states });
+        updateOverlayContent(chatId);
+        refreshExtensionPrompt();
+        toastr.info('Restored tracker data from local backup.', '', { timeOut: 2500 });
+        return true;
+    } catch (e) {
+        console.warn('[enaennTracker] Local restore failed:', e);
+        return false;
+    }
+}
+
+function updateBackupStatusUI() {
+    const el = document.getElementById('enaennTracker_backupStatus');
+    if (!el) return;
+    const ts = S().lastLocalBackupAt;
+    el.textContent = ts ? `💾 Last saved locally: ${new Date(ts).toLocaleTimeString()}` : '';
 }
 
 function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
@@ -744,9 +918,15 @@ function updateOverlayContent(chatId) {
     if (!overlay) return;
     const body = overlay.querySelector('#enaenn-overlay-body');
     const snap  = getCurrentSnapshot(chatId);
-    body.innerHTML = snap
-        ? (snap.html || '<div style="padding:8px;opacity:0.5;">No data</div>')
-        : '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
+    if (!snap) {
+        body.innerHTML = '<div style="padding:8px;opacity:0.5;">No tracker snapshot yet.</div>';
+        return;
+    }
+    // Re-render from parsed data (rather than the cached snap.html) so that
+    // flipping a category toggle in settings is reflected immediately, even
+    // on snapshots that were generated before the toggle changed.
+    const html = snap.parsed ? buildTrackerHTML(snap.parsed, S()) : (snap.html || '<div style="padding:8px;opacity:0.5;">No data</div>');
+    body.innerHTML = html;
 }
 
 // ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
@@ -754,10 +934,25 @@ function updateOverlayContent(chatId) {
 // into the main chat context. Character description and world info are sent
 // exclusively to the tracker's own API call and never reach the chat AI.
 
+// Strips out data lines belonging to a category the user has switched off in
+// settings, so the main chat API never sees them — even if they exist in an
+// older snapshot from before the toggle was switched off.
+function filterInjectionByCategory(text, s) {
+    s = s || S();
+    return text.split('\n').filter(line => {
+        const t = line.trim();
+        if (t.startsWith('ONSCREEN:')) return s.trackOnscreen !== false;
+        if (t.startsWith('RELATIONSHIP:') || t.startsWith('REL:')) return s.trackRelationships !== false;
+        if (t.startsWith('OFFSCREEN:')) return s.trackOffscreen !== false;
+        return true;
+    }).join('\n');
+}
+
 function getInjectionText(chatId) {
     const snap = getCurrentSnapshot(chatId);
     if (!snap) return '';
-    return `\n\n[TRACKER STATE]\n${snap.labeled}\n[/TRACKER STATE]\n`;
+    const body = filterInjectionByCategory(snap.labeled, S());
+    return `\n\n[TRACKER STATE]\n${body}\n[/TRACKER STATE]\n`;
 }
 
 function refreshExtensionPrompt() {
@@ -838,7 +1033,7 @@ function buildTrackerPrompt(chatId) {
 
     // 6. Compute rough total token estimate for the stats display
     //    (system prompt counted separately so the user sees the full picture)
-    const sysTokens   = estimateTokensRough(TRACKER_SYSTEM_PROMPT);
+    const sysTokens   = estimateTokensRough(buildTrackerSystemPrompt(s));
     const bodyTokens  = estimateTokensRough(assembled);
     const totalTokens = sysTokens + bodyTokens;
 
@@ -877,7 +1072,7 @@ async function postQuickApi(messages, max_tokens) {
 
 async function generateWithQuickApi(userMessage) {
     const messages = [
-        { role: 'system', content: TRACKER_SYSTEM_PROMPT },
+        { role: 'system', content: buildTrackerSystemPrompt(S()) },
         { role: 'user',   content: userMessage },
     ];
     return postQuickApi(messages, S().trackerMaxTokens || 1500);
@@ -1041,7 +1236,7 @@ async function generateWithConnectionProfile(userMessage, max_tokens) {
     if (!profile) throw new Error(`Profile "${s.connectionProfile}" not found`);
 
     const messages = [
-        { role: 'system', content: TRACKER_SYSTEM_PROMPT },
+        { role: 'system', content: buildTrackerSystemPrompt(s) },
         { role: 'user',   content: userMessage },
     ];
 
@@ -1129,7 +1324,7 @@ async function callTrackerAPI(chatId) {
         const ctx       = getContext();
         const rawResult = await ctx.generateRaw({
             prompt:       userMessage,
-            systemPrompt: TRACKER_SYSTEM_PROMPT,
+            systemPrompt: buildTrackerSystemPrompt(s),
         });
         return rawResult ? rawResult.trim() : null;
     } catch (err) {
@@ -1247,6 +1442,36 @@ const SETTINGS_HTML = `
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
         <label style="white-space:nowrap; min-width:175px;">Tracker snapshots kept per chat:</label>
         <input type="number" id="enaennTracker_windowSize" min="1" max="50" class="text_pole" style="width:60px;" />
+      </div>
+
+      <div id="enaennTracker_backupStatus" class="enaenn-gap" style="opacity:0.55; font-size:0.85em;"></div>
+
+      <hr />
+
+      <div class="enaenn-gap" style="font-weight:bold;">🗂️ Tracked Categories</div>
+      <small style="opacity:0.6;">
+        Turn a category off to stop the tracker from generating it at all (saves tokens on every tracker call),
+        hide its tab from the overlay, and keep it out of what gets sent to your main roleplay API.
+        Re-enabling starts fresh for that category — it won't remember old values.
+      </small>
+
+      <div class="flex-container flexGap5 enaenn-gap" style="margin-top:6px;">
+        <label class="checkbox_label">
+          <input type="checkbox" id="enaennTracker_trackOnscreen" />
+          <span>💖 Present / on-screen agents</span>
+        </label>
+      </div>
+      <div class="flex-container flexGap5 enaenn-gap">
+        <label class="checkbox_label">
+          <input type="checkbox" id="enaennTracker_trackRelationships" />
+          <span>💕 Relationships</span>
+        </label>
+      </div>
+      <div class="flex-container flexGap5 enaenn-gap">
+        <label class="checkbox_label">
+          <input type="checkbox" id="enaennTracker_trackOffscreen" />
+          <span>🌍 Off-screen agents</span>
+        </label>
       </div>
 
       <hr />
@@ -1374,8 +1599,41 @@ const SETTINGS_HTML = `
 // ─── BIND UI ──────────────────────────────────────────────────────────────────
 
 function bindUI() {
-    $('#enaennTracker_enabled').on('change',    function () { save({ enabled:         this.checked }); refreshExtensionPrompt(); });
+    $('#enaennTracker_enabled').on('change',    function () {
+        const chatId = getChatId();
+        save({ enabled: this.checked });
+        if (this.checked) {
+            // Re-enabling: pull back anything the local backup has that the
+            // live state might be missing.
+            restoreTrackerStateFromLocalStorageIfNeeded(chatId);
+        } else {
+            // Disabling: explicitly (and immediately) back up current values
+            // to localStorage, independent of the debounced server save.
+            backupTrackerStateToLocalStorage(chatId);
+            toastr.info('💾 Tracker data saved. It will be restored when you re-enable.', '', { timeOut: 2500 });
+        }
+        refreshExtensionPrompt();
+    });
     $('#enaennTracker_autoUpdate').on('change', function () { save({ autoUpdate:      this.checked }); });
+
+    // Tracked categories — affect the overlay tabs, what's sent to the main
+    // API, and (for the tracker's own generation) whether the category is
+    // asked for at all.
+    $('#enaennTracker_trackOnscreen').on('change', function () {
+        save({ trackOnscreen: this.checked });
+        updateOverlayContent(getChatId());
+        refreshExtensionPrompt();
+    });
+    $('#enaennTracker_trackRelationships').on('change', function () {
+        save({ trackRelationships: this.checked });
+        updateOverlayContent(getChatId());
+        refreshExtensionPrompt();
+    });
+    $('#enaennTracker_trackOffscreen').on('change', function () {
+        save({ trackOffscreen: this.checked });
+        updateOverlayContent(getChatId());
+        refreshExtensionPrompt();
+    });
     $('#enaennTracker_ctxSize').on('change',    function () { save({ contextMessages: Math.max(5,  parseInt(this.value) || 20) }); });
     $('#enaennTracker_windowSize').on('change', function () {
         const v = Math.max(1, parseInt(this.value) || 7);
@@ -1527,6 +1785,9 @@ jQuery(async () => {
     $('#enaennTracker_autoUpdate').prop('checked',   S().autoUpdate);
     $('#enaennTracker_ctxSize').val(S().contextMessages);
     $('#enaennTracker_windowSize').val(S().windowSize);
+    $('#enaennTracker_trackOnscreen').prop('checked',      S().trackOnscreen);
+    $('#enaennTracker_trackRelationships').prop('checked', S().trackRelationships);
+    $('#enaennTracker_trackOffscreen').prop('checked',     S().trackOffscreen);
     $('#enaennTracker_useCharDesc').prop('checked',  S().useCharDescription);
     $('#enaennTracker_useWI').prop('checked',        S().useWorldInfo);
     $('#enaennTracker_wiTokenLimit').val(S().wiTokenLimit);
@@ -1544,8 +1805,10 @@ jQuery(async () => {
     setTimeout(populateProfileDropdown, 3000);
 
     const chatId = getChatId();
+    restoreTrackerStateFromLocalStorageIfNeeded(chatId);
     updateOverlayContent(chatId);
     toggleOverlay(S().overlayVisible);
+    updateBackupStatusUI();
 
     // Restore last-gen stats if we have them (they don't survive page reload
     // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
@@ -1575,6 +1838,7 @@ jQuery(async () => {
     // ─── Chat changed ──────────────────────────────────────────────────────
     eventSource.on(event_types.CHAT_CHANGED, async () => {
         const chatId = getChatId();
+        restoreTrackerStateFromLocalStorageIfNeeded(chatId);
         updateOverlayContent(chatId);
         clearGenStats();
         _wiCache = [];              // stale WI entries from previous chat are meaningless

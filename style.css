@@ -119,6 +119,16 @@
 .enaenn-tabs-box input:nth-of-type(2):checked ~ .enaenn-tab-content .enaenn-tp2 { display: block; }
 .enaenn-tabs-box input:nth-of-type(3):checked ~ .enaenn-tab-content .enaenn-tp3 { display: block; }
 
+/* Shown instead of the tab box when only one category is enabled */
+.enaenn-single-section {
+    border: 1px solid color-mix(in srgb, var(--SmartThemeBodyColor) 12%, transparent);
+    border-radius: 10px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--SmartThemeBodyColor) 2%, transparent);
+    padding: 8px;
+    box-sizing: border-box;
+}
+
 /* ══════════════════════════════════════════════════
    TAB 1 — AGENTS PRESENT (flat list)
    ══════════════════════════════════════════════════ */
