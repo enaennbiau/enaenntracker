@@ -125,7 +125,7 @@ HIGH-critical vitals (💧 thirst, 🚽 bladder, 🧠 stress) — high values ar
   Output integers 0–100. Severity reference: ≤50% = ok; 70–74.9% = warn; ≥75% = critical.
 
 EXCEPTION (🔥 Arousal) - the higher, the worse critical thinking, and thicker mental fog is:
-  Output integers 0–200. 0–99%: Mental arousal and biochemical response. 101-199%: physical stimulation of nerve endings and active motor response (touch, friction, or muscle tension). 200% ALWAYS triggers climax. 
+  Output integers 0–200. 0–99%: Mental arousal and biochemical response. 101-199%: ONLY WHEN physical stimulation of nerve endings and active motor response (touch, friction, or muscle tension). 200% ALWAYS triggers climax. 
 
 RATES — scale these by your Step 1 time estimate. These are NOT "per turn" values:
 🍴  decay −0.2–0.4% per 5 min (−2.4–4.8%/hr).  Meal: +60–80%. Snack: +10–17%.
