@@ -124,7 +124,7 @@ LOW-critical vitals (🍴 food/satiation, 😴 energy, 🚿 hygiene) — low val
 HIGH-critical vitals (💧 thirst, 🚽 bladder, 🧠 stress) — high values are bad:
   Output integers 0–100. Severity reference: ≤50% = ok; 70–74.9% = warn; ≥75% = critical.
 
-🔥 Arousal (0–200%) — output actual integer value.
+🔥 Arousal (0–200%) — output actual integer value. IMPORTANT: value rises past 100% ONLY during ACTUAL sexual activity (physical mostly, unless the character is overstimulated mentally). Reaching 200% ALWAYS triggers climax. 
 
 RATES — scale these by your Step 1 time estimate. These are NOT "per turn" values:
 🍴  decay −0.2–0.4% per 5 min (−2.4–4.8%/hr).  Meal: +60–80%. Snack: +10–17%.
@@ -134,7 +134,7 @@ RATES — scale these by your Step 1 time estimate. These are NOT "per turn" val
     Shower: +95–100%. Quick wash: +5–10%. Clean clothes +3-5%. Swimming may restore or reduce 🚿 depending on the water source.
 💧/🚽 rise +0.3–0.7% per 5 min. Caffeine/alcohol/heat/exercise accelerate 💧. Glass of water: 💧 −45-55%, 🚽 +8-12%. Meal w/ drinks: 💧 −30-45%. One sip: 💧 −10-15%. Bottle of water: -100, 🚽 +20-25.
 🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs. Halted during active stressors. Agent coping mechanisms may modify rate. 🧠 increases from unmet needs, social friction, danger, or active 🩹 conditions. High stress affects all "In The Moment" feelings and accelerates decay of 😴. 
-🔥  builds +2–8% per 5 min with sexual stimulus. Decays ~−0.5% per 5 min without. Modified by psychological engagement, comfort, sensitivity. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. IMPORTANT: values past 100% reserved for sexual activity only. Reaching 200% triggers climax. 
+🔥  builds +2–8% per 5 min with sexual stimulus. Decays ~−0.5% per 5 min without. Modified by psychological engagement, comfort, sensitivity. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. 
 
 Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
