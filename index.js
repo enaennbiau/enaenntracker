@@ -126,6 +126,8 @@ HIGH-critical vitals (💧 thirst, 🚽 bladder, 🧠 stress) — high values ar
 
 EXCEPTION (🔥 arousal) - the higher, the worse critical thinking, and thicker mental fog is:
   Output integers 0–200. 0–99%: Mental arousal and biochemical response. 101-199%: ONLY WHEN physical stimulation of nerve endings and active motor response (touch, friction, or muscle tension). 200% ALWAYS triggers climax. 
+  
+  🩹 conditions:  Append the approximate remaining duration to the ACTIVE condition(s), e.g., “Drunk (~6h left)”, “MDMA high (~5h left)”, “Sick (~5 days until better)”, and so on. Base durations on real pharmacokinetics—alcohol clears at ~1 drink/hour, MDMA lasts 3–6h (use 4.5h unless dose is specified), a cold lasts 7–10 days (cough may linger longer), a broken leg heals in ~6–12 weeks (full recovery up to a year).
 
 RATES — scale these by your Step 1 time estimate:
 🍴  decay −0.2–0.4% per 5 min (−2.4–4.8%/hr).  Meal: +60–80%. Snack: +10–17%.
@@ -215,7 +217,7 @@ OUTPUT FORMAT (plain text only)
 
 Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields separated by " | ".
 
-LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for each agent ({{user}} is not an agent!)' : ' relevant to the scene'}]`;
+LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for each agent ({{user}} is not an agent, AVOID tracking them!)' : ' relevant to the scene'}]`;
 
     if (trackOnscreen) {
         outFmt += `
@@ -225,7 +227,7 @@ ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] |
 
   Vital values: integers 0–100 (arousal 0–200).
   Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
-  Condition: concise text and its effect, or - if none.`;
+  Condition: concise text and its effect. Or - if there are none.`;
     }
 
     if (trackRelationships) {
