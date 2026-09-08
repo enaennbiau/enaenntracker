@@ -82,7 +82,7 @@ STRICT OUTPUT RULES
 - Calculate and update previous tracker state values based on the current scene and STEPS described lower.
 - Output only the plain-text data lines defined in the OUTPUT FORMAT step. No HTML. No markdown. No code fences. No commentary.`;
     if (trackAnyAgents) {
-        strict += `\n- Never include user/{{user}} as an agent. USER IS NOT AN AGENT. Track {{char}}, side characters, and significant NPCs only.`;
+        strict += `\n- Never include {{user}} in the tracking. Track ONLY agents ({{char}}, side characters, significant NPCs)`;
     }
     strict += `\n- If no previous tracker state exists, initialize all values fresh from chat context.`;
     parts.push(strict);
@@ -217,12 +217,12 @@ OUTPUT FORMAT (plain text only)
 
 Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields separated by " | ".
 
-LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for each agent ({{user}} is not an agent, AVOID tracking them!)' : ' relevant to the scene'}]`;
+LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for each present agent' : ' relevant to the scene'}]`;
 
     if (trackOnscreen) {
         outFmt += `
 
-[One ONSCREEN line per agent physically present in the scene — never the user. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
+[One ONSCREEN line per agent physically present in the scene. Never track user's vitals. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
 ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
 
   Vital values: integers 0–100 (arousal 0–200).
