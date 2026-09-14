@@ -139,6 +139,15 @@ RATES — scale these by your Step 1 time estimate:
 🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs. Halted during active stressors. Agent coping mechanisms may modify rate. 🧠 increases from unmet needs, social friction, danger, or active 🩹 conditions. High stress affects all "In The Moment" feelings and accelerates decay of 😴. 
 🔥  rises +2–8% per 5 min of stimulus (depends on psychological engagement, comfort, sensitivity). Decays ~−0.5% per 5 min. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. Sudden shock, fear, or extreme mood-killers cause an immediate 🔥 drop of −30-50% and more, depending on the severity. IMPORTANT: arousal can't go past 99% without actual physical stimulation. 
 
+SUBSTANCE USE ADJUSTMENTS:
+    Caffeine: 😴 +10–15% (halts decay 1–2 hrs), after 1-2hrs 😴 -20%. 💧/🚽 rise rates ×1.5. 🧠 decay slows (adds friction) if overused.
+    Alcohol: 🧠 immediate −10–20% (rapid stress relief). 💧/🚽 rise rates x2. 😴 decay accelerates (×1.5) after 1–2 hrs (during crash).
+    Nicotine: 🧠 instant −5–10% (halts stress rise). 🍴 decay halved for ~1 hr (appetite suppressant).
+    Cannabis: 🍴 decay ×2–3 (munchies). 💧 accelerates (cottonmouth). 🧠 immediate −15–25% (but rapid rise if paranoia triggers). 😴 decay ×1.5.
+    Stimulants (Cocaine/Amphetamines): 😴 instant +30–50% (halts decay 2–6 hrs). 🍴 decay halted. 🔥 rise ×2. Crash: 😴 instant −40%, 🧠 spikes rapidly.
+    Opioids/Heavy Sedatives: 🧠 forces rapid decay to near 0 (total numbness). 🩹 completely nullifies active conditions. 😴 decay ×2–3 (extreme sedation).
+    Psychedelics (LSD/Shrooms): 🧠 highly volatile (locks to rapid decay or rapid rise). 🍴 and 😴 decay halted during trip (6–8 hrs), followed by complete 😴 exhaustion.
+
 Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
 Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).`;
