@@ -613,19 +613,33 @@
     color: var(--SmartThemeBodyColor, #cdd6f4);
 }
 #enaenn-overlay-header span { opacity: 0.8; }
+#enaenn-overlay-header > div {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+}
 #enaenn-overlay-header button {
     background: none;
     border: none;
     color: var(--SmartThemeBodyColor);
     cursor: pointer;
-    min-width: 32px;
-    min-height: 32px;
-    padding: 0 6px;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0 3px;
     opacity: 0.6;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 1;
+    flex-shrink: 0;
 }
 #enaenn-overlay-header button:hover { opacity: 1; }
+#enaenn-overlay-header button:disabled { opacity: 0.25; cursor: default; }
+
+/* Refresh/Restore/Collapse/Close stay put; Stop only shows up mid-generation
+   so it doesn't take up header space the rest of the time. */
+#enaenn-overlay-stop {
+    display: none;
+    color: #ff6b6b;
+}
 
 #enaenn-overlay-body {
     height: calc(100% - 34px);

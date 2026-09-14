@@ -828,6 +828,9 @@ function createOverlay() {
         <div id="enaenn-overlay-header">
             <span>📊 Tracker</span>
             <div>
+                <button id="enaenn-overlay-refresh" title="Refresh tracker now">🔄</button>
+                <button id="enaenn-overlay-restore" title="Restore previous tracker snapshot">♻️</button>
+                <button id="enaenn-overlay-stop" title="Stop tracker generation">⏹️</button>
                 <button id="enaenn-overlay-collapse" title="Collapse/Expand">▸</button>
                 <button id="enaenn-overlay-close" title="Close overlay">✕</button>
             </div>
@@ -895,6 +898,16 @@ function createOverlay() {
 
     overlay.querySelector('#enaenn-overlay-close')
         .addEventListener('click', () => toggleOverlay(false));
+
+    // These three mirror the Refresh/Restore/Stop buttons in the extension
+    // settings panel, but live in the header so they're reachable both when
+    // the overlay is fully open and when it's collapsed to just its title bar.
+    overlay.querySelector('#enaenn-overlay-refresh')
+        .addEventListener('click', () => updateTracker());
+    overlay.querySelector('#enaenn-overlay-restore')
+        .addEventListener('click', () => { deleteLastTracker(); });
+    overlay.querySelector('#enaenn-overlay-stop')
+        .addEventListener('click', () => abortTrackerUpdate());
 
     collapseBtn.textContent = overlayCollapsed ? '▸' : '▾';
     overlay.classList.toggle('collapsed', overlayCollapsed);
@@ -1052,7 +1065,7 @@ let _pendingGenStats = null;
 
 // ─── QUICK API ────────────────────────────────────────────────────────────────
 
-async function postQuickApi(messages, max_tokens) {
+async function postQuickApi(messages, max_tokens, signal) {
     const s = S();
     const base = s.quickApiUrl.replace(/\/+$/, '');
     const headers = { 'Content-Type': 'application/json' };
@@ -1062,6 +1075,7 @@ async function postQuickApi(messages, max_tokens) {
         method:  'POST',
         headers,
         body:    JSON.stringify({ model: s.quickApiModel, messages, max_tokens, temperature: 0.2 }),
+        signal,
     });
 
     if (!res.ok) {
@@ -1073,12 +1087,12 @@ async function postQuickApi(messages, max_tokens) {
     return json.choices?.[0]?.message?.content?.trim() || '';
 }
 
-async function generateWithQuickApi(userMessage) {
+async function generateWithQuickApi(userMessage, signal) {
     const messages = [
         { role: 'system', content: buildTrackerSystemPrompt(S()) },
         { role: 'user',   content: userMessage },
     ];
-    return postQuickApi(messages, S().trackerMaxTokens || 1500);
+    return postQuickApi(messages, S().trackerMaxTokens || 1500, signal);
 }
 
 async function fetchQuickApiModels() {
@@ -1229,7 +1243,7 @@ function extractTextFromProfileResponse(resp) {
     return null;
 }
 
-async function generateWithConnectionProfile(userMessage, max_tokens) {
+async function generateWithConnectionProfile(userMessage, max_tokens, signal) {
     const ctx = getContext();
     if (!ctx.ConnectionManagerRequestService) {
         throw new Error('ConnectionManagerRequestService is not available in this SillyTavern version');
@@ -1259,12 +1273,19 @@ async function generateWithConnectionProfile(userMessage, max_tokens) {
     }
 
     try {
+        // `signal` is passed through in case this ST version's
+        // ConnectionManagerRequestService honors an AbortSignal — harmless
+        // extra property if it doesn't. Either way, updateTracker() discards
+        // the result once the user cancels, so the Stop button always feels
+        // instant even on ST versions that can't truly cancel the in-flight
+        // request.
         const response = await ctx.ConnectionManagerRequestService.sendRequest(
             profile.id,
             messages,
             max_tokens,
-            { stream: false, extractData: true, includePreset: true, includeInstruct: true },
+            { stream: false, extractData: true, includePreset: true, includeInstruct: true, signal },
         );
+        if (signal?.aborted) return null;
         const text = extractTextFromProfileResponse(response);
         if (text == null) throw new Error('Unexpected response format from API');
         return text.trim();
@@ -1313,24 +1334,29 @@ function updateProfileStatus() {
 
 // ─── MAIN API DISPATCH ────────────────────────────────────────────────────────
 
-async function callTrackerAPI(chatId) {
+async function callTrackerAPI(chatId, signal) {
     const s           = S();
     const userMessage = buildTrackerPrompt(chatId);
 
     try {
         if (s.quickApiEnabled && s.quickApiUrl && s.quickApiModel) {
-            return (await generateWithQuickApi(userMessage)) || null;
+            return (await generateWithQuickApi(userMessage, signal)) || null;
         }
         if (s.connectionProfile) {
-            return (await generateWithConnectionProfile(userMessage, s.trackerMaxTokens || 1500)) || null;
+            return (await generateWithConnectionProfile(userMessage, s.trackerMaxTokens || 1500, signal)) || null;
         }
         const ctx       = getContext();
         const rawResult = await ctx.generateRaw({
             prompt:       userMessage,
             systemPrompt: buildTrackerSystemPrompt(s),
+            signal,
         });
         return rawResult ? rawResult.trim() : null;
     } catch (err) {
+        if (err?.name === 'AbortError' || signal?.aborted) {
+            // User-initiated cancel via the Stop button — not a real error.
+            return null;
+        }
         console.error('[enaennTracker]', err);
         toastr.error(`enaennTracker: ${err.message}`);
         return null;
@@ -1339,21 +1365,34 @@ async function callTrackerAPI(chatId) {
 
 // ─── MAIN UPDATE FLOW ─────────────────────────────────────────────────────────
 
-let _updating = false;
+let _updating              = false;
+let _updateAbortController = null;
 
 async function updateTracker() {
     if (_updating)     return;
     if (!S().enabled)  return;
 
-    const chatId = getChatId();
-    _updating = true;
+    const chatId     = getChatId();
+    const controller = new AbortController();
+    _updating               = true;
+    _updateAbortController  = controller;
     setLoadingState(true);
     _pendingGenStats = null;
 
-    const rawResult = await callTrackerAPI(chatId);
+    const rawResult = await callTrackerAPI(chatId, controller.signal);
 
-    setLoadingState(false);
-    _updating = false;
+    // Only clear the shared "in progress" state if a newer run hasn't
+    // already taken it over (defensive — abort should normally prevent this).
+    if (_updateAbortController === controller) {
+        _updating              = false;
+        _updateAbortController = null;
+        setLoadingState(false);
+    }
+
+    // If the user hit Stop, discard whatever came back (even if the
+    // underlying request actually finished) instead of applying a stale/
+    // unwanted tracker update.
+    if (controller.signal.aborted) return;
 
     if (!rawResult) {
         // Still update stats display even on failure (shows last attempt)
@@ -1386,6 +1425,22 @@ async function updateTracker() {
     toastr.success('Tracker updated!', '', { timeOut: 1500 });
 }
 
+// Stops an in-progress tracker generation. Works even if the underlying API
+// call can't truly be interrupted (e.g. some ConnectionManager profiles) —
+// in that case the request is still told to abort, and either way the result
+// gets discarded and the UI is immediately released, so it never feels stuck.
+function abortTrackerUpdate() {
+    if (!_updating || !_updateAbortController) {
+        toastr.info('No tracker generation is currently running.', '', { timeOut: 2000 });
+        return;
+    }
+    try { _updateAbortController.abort(); } catch { /* ignore */ }
+    _updating              = false;
+    _updateAbortController = null;
+    setLoadingState(false);
+    toastr.warning('Tracker generation stopped.', '', { timeOut: 2000 });
+}
+
 // ─── DELETE / RESTORE ─────────────────────────────────────────────────────────
 
 async function deleteLastTracker() {
@@ -1408,9 +1463,19 @@ function setLoadingState(loading) {
     $('#enaennTracker_regenBtn')
         .prop('disabled', loading)
         .text(loading ? '⏳ Updating…' : '♻️ Restore Previous');
+    $('#enaennTracker_stopBtn')
+        .prop('disabled', !loading);
     $('#enaennTracker_toolbarBtn')
         .prop('disabled', loading)
         .text(loading ? '⏳' : '📊');
+
+    // Overlay header mini-buttons — reachable whether the overlay is fully
+    // open or collapsed down to just its title bar. Refresh/Restore are
+    // disabled mid-generation; Stop only appears once there's something to
+    // stop, so it doesn't clutter the header the rest of the time.
+    $('#enaenn-overlay-refresh').prop('disabled', loading);
+    $('#enaenn-overlay-restore').prop('disabled', loading);
+    $('#enaenn-overlay-stop').toggle(loading);
 }
 
 // ─── SETTINGS UI ──────────────────────────────────────────────────────────────
@@ -1592,6 +1657,7 @@ const SETTINGS_HTML = `
       <div class="flex-container flexGap5">
         <button id="enaennTracker_refreshBtn" class="menu_button flex1">🔄 Refresh Tracker</button>
         <button id="enaennTracker_regenBtn"   class="menu_button flex1" title="Undo the last tracker update (restore previous snapshot).">♻️ Restore Previous</button>
+        <button id="enaennTracker_stopBtn"    class="menu_button" title="Abort the tracker generation currently in progress." disabled>⏹️ Stop</button>
         <button id="enaennTracker_clearBtn"   class="menu_button" title="Clear all snapshots for this chat.">🗑️ Clear State</button>
       </div>
 
@@ -1751,6 +1817,7 @@ function bindUI() {
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
     $('#enaennTracker_regenBtn').on('click',   async () => { await deleteLastTracker(); });
+    $('#enaennTracker_stopBtn').on('click',    () => abortTrackerUpdate());
     $('#enaennTracker_clearBtn').on('click', () => {
         const chatId = getChatId();
         setSnapshots(chatId, []);
