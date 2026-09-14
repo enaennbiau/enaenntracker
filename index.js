@@ -131,13 +131,13 @@ EXCEPTION (🔥 arousal) - the higher, the worse critical thinking, and thicker 
 
 RATES — scale these by your Step 1 time estimate:
 🍴  decay −0.9–1.3% (when awake, but minimal movement) / −1.6–2.1% (during normal functioning) / −0.5–0.8% (during sleep) per 5 min  (−11–15% (awake, but minimal movement) / −19–25% (normal functioning) / −6–10% (asleep) /hr). Meal: +60–80%. Snack: +10–17%.
-😴  decay −0.25–0.33% per 5 min (−3–4%/hr, normal); −0.4–0.6% per 5 min (strenuous).
+😴  decay −0.41–0.45% per 5 min (−5-5.4%/hr, normal); −0.56–0.59% per 5 min (stressed).
     Sleep: +10–15%/hr. 
 🚿  decay −0.05–0.15% per 5 min (×3–4 during exertion/heat).
     Shower: +95–100%. Quick wash: +5–10%. Clean clothes +3-5%. Swimming may restore or reduce 🚿 depending on the water source.
-💧/🚽 rise +0.3–0.7% per 5 min. Caffeine/alcohol/heat/exercise accelerate 💧. Glass of water: 💧 −45-55%, 🚽 +8-12%. Meal w/ drinks: 💧 −30-45%. One sip: 💧 −10-15%. Bottle of water: -100, 🚽 +20-25.
+💧/🚽 rise +0.3–0.7% per 5 min. Caffeine/alcohol/heat/exercise accelerate 💧. Glass of water: 💧 −45-55%, 🚽 +20-30%. Meal w/ drinks: 💧 −30-45%. One sip: 💧 −10-15%. Bottle of water: -100, 🚽 +40-60.
 🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs. Halted during active stressors. Agent coping mechanisms may modify rate. 🧠 increases from unmet needs, social friction, danger, or active 🩹 conditions. High stress affects all "In The Moment" feelings and accelerates decay of 😴. 
-🔥  rises +2–8% per 5 min of stimulus (depends on psychological engagement, comfort, sensitivity). Decays ~−0.5% per 5 min. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. IMPORTANT: arousal can't go past 99% without actual physical stimulation. 
+🔥  rises +2–8% per 5 min of stimulus (depends on psychological engagement, comfort, sensitivity). Decays ~−0.5% per 5 min. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. Sudden shock, fear, or extreme mood-killers cause an immediate 🔥 drop of −30-50% and more, depending on the severity. IMPORTANT: arousal can't go past 99% without actual physical stimulation. 
 
 Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
