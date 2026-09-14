@@ -130,7 +130,7 @@ EXCEPTION (🔥 arousal) - the higher, the worse critical thinking, and thicker 
   🩹 conditions:  Append the approximate remaining duration to the ACTIVE condition(s), e.g., “Drunk (~6h left)”, “MDMA high (~5h left)”, “Sick (~5 days until better)”, and so on. Base durations on real pharmacokinetics—alcohol clears at ~1 drink/hour, MDMA lasts 3–6h (use 4.5h unless dose is specified), a cold lasts 7–10 days (cough may linger longer), a broken leg heals in ~6–12 weeks (full recovery up to a year).
 
 RATES — scale these by your Step 1 time estimate:
-🍴  decay −0.2–0.4% per 5 min (−2.4–4.8%/hr).  Meal: +60–80%. Snack: +10–17%.
+🍴  decay −0.9–1.3% (when awake, but minimal movement) / −1.6–2.1% (during normal functioning) / −0.5–0.8% (during sleep) per 5 min  (−11–15% (awake, but minimal movement) / −19–25% (normal functioning) / −6–10% (asleep) /hr). Meal: +60–80%. Snack: +10–17%.
 😴  decay −0.25–0.33% per 5 min (−3–4%/hr, normal); −0.4–0.6% per 5 min (strenuous).
     Sleep: +10–15%/hr. 
 🚿  decay −0.05–0.15% per 5 min (×3–4 during exertion/heat).
