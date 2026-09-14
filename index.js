@@ -109,7 +109,7 @@ Track which agents are physically present right now in the scene. Off-screen age
         parts.push(`════════════════════════════════════
 STEP 2 - TRACK SIGNIFICANT AGENTS
 ════════════════════════════════════
-On-screen presence tracking is disabled in this configuration. Track significant agents relevant to the story (their location, activity, and state) regardless of whether they are in the current scene.`);
+On-screen presence tracking is disabled in this configuration. Track significant agents relevant to the story (their location, activity, and state) regardless of whether they are in the current scene. Make sure they live their own life and do their own stuff. Strictly avoid forcing then to sleep past the 'rested' state.`);
     }
 
     // ── STEP 3 — vitals ─────────────────────────────────────────────────
@@ -143,7 +143,7 @@ Round the calculated results to a maximum of two decimal places.
 NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
 Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).`;
         if (trackOffscreen) {
-            step3 += `\nFor off-screen agents track vitals approximately, using the labels from the template in the OUTPUT FORMAT step.${trackOnscreen ? ' When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.' : ''}`;
+            step3 += `\nFor off-screen agents track vitals approximately, using the labels from the template in the OUTPUT FORMAT step. Mark the time they fell asleep at (if theyre asleep), and wake them up after 8-12 hours depending on the state they fell asleep in. AVOID situations where the off-screen agents are asleep for more than 12 hours unless they're in a coma. Their life goes in - they have obligations, inner thoughts, places to be, desires, impulses to meet/call/go somewhere, to have sex, and so on, just like the real people have it.${trackOnscreen ? ' When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.' : ''}`;
         }
         step3 += `\n\n🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort. Show only when there are active conditions.`;
         parts.push(step3);
