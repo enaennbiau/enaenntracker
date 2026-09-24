@@ -156,6 +156,24 @@ Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽�
         }
         step3 += `\n\n🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort, substance use. Show only when there are active conditions.`;
         parts.push(step3);
+
+        // ── STEP 3.5 — setting-specific resource (SSR) ────────────────────
+        parts.push(`════════════════════════════════════
+STEP 3.5 — SETTING-SPECIFIC RESOURCE (SSR), ONLY IF APPLICABLE
+════════════════════════════════════
+Some settings define a resource for an agent that isn't one of the standard vitals above — e.g. mana, life force/vitae, stamina charge, corruption, sanity, ki, soul energy, and so on. Detect this ONLY from the character card, world info, or explicit narrative establishment — never invent one unprompted, and never apply it to an agent who is not established as having such a resource.
+
+If such a resource exists for an agent, track it using this template instead of inventing new fixed rules:
+  Direction: infer whether it is LOW-critical (running out is bad) or HIGH-critical (accumulating is bad).
+  Range: 0–100 unless the setting specifies otherwise.
+  Replenish trigger(s): infer from the setting what in-fiction action restores it (feeding, meditation, resting at a shrine, a kill, casting downtime, etc.) and roughly how much per instance.
+  Passive drift: infer whether it decays/regenerates on its own over time, and at what rough rate — scale similarly to the pacing used for the standard vitals above.
+  Expenditure trigger(s): infer what actions consume it, and roughly how much per use.
+  State label: a short in-fiction descriptor for the current tier (e.g. "Sated", "Peckish", "Starving", "Overcharged").
+
+  BOOST: if replenishing the resource grants the agent a temporary supernatural or physical enhancement (strength, speed, healing, sharpened senses, stronger powers, etc.), track it the same way 🩹 conditions are tracked — concise text plus the approximate remaining duration, e.g. "Enhanced strength (~2h left)", "Abilities sharpened (~30min left)". Base the strength and duration of the boost on how much was gained and on the setting's own established rules. Show only when an active boost exists; otherwise omit it.
+
+  If multiple agents have different resource types, track each independently — do not conflate them into one shared value.`);
     }
 
     // ── STEP 4 — relationships ──────────────────────────────────────────
@@ -258,6 +276,12 @@ OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energ
 
     outFmt += `
 
+[Only if an agent has a Setting-Specific Resource per STEP 3.5 — one SSR line per such agent. Omit entirely for agents without one.]
+SSR: [Name] | [emoji] | [resource label] | [value 0–100] | [low or high] | [Δvalue] | [state label] | [boost or -]
+  Value/delta follow the same formatting as the standard vitals. First snapshot delta: —`;
+
+    outFmt += `
+
 [Only if upcoming plans exist:]
 PLAN: [date] | [description]`;
 
@@ -279,6 +303,11 @@ REL: Caleb | 347 | Suppressed Longing (0) | + | 20 years (since birth) | Childho
     if (trackOffscreen) {
         example += `
 OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | fine | rested | fresh | fine | fine | none | calm | Eat. Act normal. Don't think about her.`;
+    }
+    if (trackOnscreen || trackOffscreen) {
+        example += `
+[SSR example — only output a line like this if the agent actually has a Setting-Specific Resource per STEP 3.5; omit otherwise:]
+SSR: Kevin | 🩸 | Vitae | 62 | low | +18 | Sated | Enhanced strength (~2h left)`;
     }
     example += `
 PLAN: 18 May | Caleb's gallery opening — {{user}} invited by Lysa`;
@@ -466,7 +495,7 @@ function buildWorldInfoBlock(tokenLimit) {
 // ─── DATA PARSER ──────────────────────────────────────────────────────────────
 
 function parseTrackerData(text) {
-    const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [] };
+    const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [], ssr: [] };
     for (const rawLine of text.split('\n')) {
         const line = rawLine.trim();
         if (!line) continue;
@@ -507,6 +536,19 @@ function parseTrackerData(text) {
                 vitals: { hunger: f[4], energy: f[5], clean: f[6], bladder: f[7], thirst: f[8], arousal: f[9], stress: f[10] },
                 impulse: f[11],
             });
+        } else if (line.startsWith('SSR:')) {
+            const f = p('SSR:');
+            if (f.length < 6) continue;
+            data.ssr.push({
+                agent:    f[0] || '',
+                emoji:    f[1] || '✨',
+                name:     f[2] || 'Resource',
+                val:      numVal(f[3]),
+                polarity: (f[4] || 'low').trim().toLowerCase() === 'high' ? 'high' : 'low',
+                delta:    f[5] || '—',
+                state:    f[6] || '',
+                boost:    (f[7] && f[7] !== '-') ? f[7] : null,
+            });
         } else if (line.startsWith('PLAN:')) {
             const f = p('PLAN:');
             if (f.length >= 2) data.plans.push({ date: f[0], desc: f[1] });
@@ -526,6 +568,21 @@ function buildVitalsHTML(vitals) {
     }).join('\n');
 }
 
+// Renders an agent's Setting-Specific Resource(s) (mana, life force, etc.) in
+// their own foldable container, reusing the exact same classes as the
+// standard vitals fold so no new CSS is needed. Kept separate from the
+// standard vitals fold so it never appears for agents without an SSR.
+function buildSSRHTML(ssrList) {
+    if (!ssrList || !ssrList.length) return '';
+    const rows = ssrList.map(r => {
+        const colorCls  = vitalColorClass(r.polarity, r.val);
+        const barWidth  = Math.min(r.val, 100);
+        const boostHTML = r.boost ? `<div class="enaenn-condition">✨ ${esc(r.boost)}</div>` : '';
+        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${esc(r.emoji)}</span><span class="enaenn-vital-label">${esc(r.name)}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${r.val}%</span><span class="enaenn-vital-delta">(${esc(r.delta)})</span></div>${boostHTML}`;
+    }).join('');
+    return `<details class="enaenn-vitals-fold"><summary>Resources</summary><div class="enaenn-vitals">${rows}</div></details>`;
+}
+
 function buildTrackerHTML(data, s) {
     s = s || S();
     const showOnscreen  = s.trackOnscreen      !== false;
@@ -538,8 +595,9 @@ function buildTrackerHTML(data, s) {
 
     if (showOnscreen) {
         const content = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(a => {
-            const cond = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
-            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals)}</div></details>${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
+            const cond   = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
+            const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
+            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals)}</div></details>${ssrHTML}${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
         }).join('<div class="enaenn-agent-sep"></div>');
         tabs.push({ label: '💖 Present', content });
     }
@@ -557,7 +615,8 @@ function buildTrackerHTML(data, s) {
     if (showOffscreen) {
         const content = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(a => {
             const v = a.vitals;
-            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div></div>`;
+            const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
+            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div>${ssrHTML}</div>`;
         }).join('');
         tabs.push({ label: '🌍 Off‑screen', content });
     }
@@ -969,6 +1028,7 @@ function filterInjectionByCategory(text, s) {
         if (t.startsWith('ONSCREEN:')) return s.trackOnscreen !== false;
         if (t.startsWith('RELATIONSHIP:') || t.startsWith('REL:')) return s.trackRelationships !== false;
         if (t.startsWith('OFFSCREEN:')) return s.trackOffscreen !== false;
+        if (t.startsWith('SSR:')) return s.trackOnscreen !== false || s.trackOffscreen !== false;
         return true;
     }).join('\n');
 }
