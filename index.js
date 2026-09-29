@@ -173,7 +173,30 @@ If such a resource exists for an agent, track it using this template instead of 
 
   BOOST: if replenishing the resource grants the agent a temporary supernatural or physical enhancement (strength, speed, healing, sharpened senses, stronger powers, etc.), track it the same way 🩹 conditions are tracked — concise text plus the approximate remaining duration, e.g. "Enhanced strength (~2h left)", "Abilities sharpened (~30min left)". Base the strength and duration of the boost on how much was gained and on the setting's own established rules. Show only when an active boost exists; otherwise omit it.
 
-  If multiple agents have different resource types, track each independently — do not conflate them into one shared value.`);
+  If multiple agents have different resource types, track each independently — do not conflate them into one shared value.
+
+  ── NON-HUMAN VITAL ADAPTATION (only for agents established as non-human: vampires, ghouls, werewolves, demons, spirits, fae, etc.) ──
+  Read the character card, world info and chat for what the creature needs in order to live or function. Sort every such need:
+    • NEED that works like feeding (the agent weakens, starves or loses control without it, on a schedule — blood, flesh, emotions, life force, souls) → it becomes a modifier of 🍴 and replaces the human 🍴 rates for that agent.
+    • NEED that works like rest or vigor → it becomes a modifier of 😴.
+    • TOOL that is spent to do things (mana, ki, spell power, etc.) → SSR line, exactly as described above.
+    • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers adds extra drain to it. Do not also output a duplicate SSR line for it.
+
+  Output one line per such agent, right before their SSR line (or where it would be):
+  NATURE: [Name] | [species/type] | [🍴 modifier] | [😴 modifier] | [rule note, one short line]
+    Modifier = ONE emoji shown in front of the base emoji (🩸 → 🩸🍴, ✨ → ✨😴). Write - if that vital stays human-standard. Write hide if that vital does not apply to the agent at all; for a hidden vital still output 0 in its value slot and — in its delta slot.
+    Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Blood only; human food gives ~0–5%; sleeps by day").
+    hide applies ONLY to creatures that truly have no such need: purely spiritual/infernal demons (hellborn fiends, bound or summoned demons, demon lords in true form), and undead/constructs that neither feed nor sleep (skeletons, wraiths, golems). Demons that DO feed — succubi/incubi, dream- or emotion-eaters, soul-eaters, gluttony/hunger demons — get a modifier, not hide.
+    Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the narrative establishes a change (turned, cursed, cured, transformed permanently). Never apply it to humans.
+    The character card's own stated rules ALWAYS override the reference rates below.
+
+  Reference 🍴 rates for feeding needs (percent of the 0–100 bar; scale by your Step 1 time estimate):
+    Slow-burn feeder (classic vampire, blood-drinker): −1–2%/hr while resting, ×2–3 during exertion, power use or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
+    Flesh-hungry (ghoul): −2–3%/hr. Fresh flesh: +40–70%.
+    Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −3–5%/hr, faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
+    Cyclical / predatory (werewolf): 🍴 stays human-standard (write -). Track the beast hunger, moon phase or transformation as a 🩹 condition with remaining duration, not as a 🍴 modifier.
+    Ordinary human food, for a creature that does not live on it: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
+  Reference 😴 adaptations: nocturnal or day-sleeping creatures use the normal sleep and decay rates but shifted to their own cycle; creatures that recharge from a place, ritual or ambient source (per the card) regain 😴 there instead of by sleeping. If the card gives nothing specific, keep the standard 😴 rates.`);
     }
 
     // ── STEP 4 — relationships ──────────────────────────────────────────
@@ -492,10 +515,41 @@ function buildWorldInfoBlock(tokenLimit) {
     return { text, tokenCount: usedTokens, entryCount: lines.length, truncated };
 }
 
+// ─── NON-HUMAN VITAL ADAPTATION (NATURE line) ─────────────────────────────────
+// A NATURE line gives a non-human agent an emoji prefix on 🍴 / 😴, or hides
+// that vital entirely. Agents without a NATURE line render exactly as before.
+
+function parseNatureMod(raw) {
+    const v = String(raw ?? '').trim();
+    if (!v || v === '-' || v === '—') return { hide: false, emoji: '' };
+    if (v.toLowerCase() === 'hide')   return { hide: true,  emoji: '' };
+    return { hide: false, emoji: v };
+}
+
+function findNature(list, name) {
+    const n = String(name ?? '').trim().toLowerCase();
+    return (list || []).find(x => String(x.agent).trim().toLowerCase() === n) || null;
+}
+
+// Applies a NATURE entry to VITAL_META: returns only the visible vitals, with
+// the modifier emoji stacked in front of the base emoji (🩸🍴).
+function applyNatureToMeta(nature) {
+    return VITAL_META.filter(m => {
+        if (!nature) return true;
+        if (m.key === 'satiation') return !nature.food.hide;
+        if (m.key === 'energy')    return !nature.energy.hide;
+        return true;
+    }).map(m => {
+        if (!nature) return m;
+        const mod = m.key === 'satiation' ? nature.food.emoji : m.key === 'energy' ? nature.energy.emoji : '';
+        return mod ? { ...m, emoji: mod + m.emoji } : m;
+    });
+}
+
 // ─── DATA PARSER ──────────────────────────────────────────────────────────────
 
 function parseTrackerData(text) {
-    const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [], ssr: [] };
+    const data = { location: '', agents: [], relationships: [], offscreen: [], plans: [], ssr: [], nature: [] };
     for (const rawLine of text.split('\n')) {
         const line = rawLine.trim();
         if (!line) continue;
@@ -549,6 +603,16 @@ function parseTrackerData(text) {
                 state:    f[6] || '',
                 boost:    (f[7] && f[7] !== '-') ? f[7] : null,
             });
+        } else if (line.startsWith('NATURE:')) {
+            const f = p('NATURE:');
+            if (f.length < 4) continue;
+            data.nature.push({
+                agent:   f[0] || '',
+                species: f[1] || '',
+                food:    parseNatureMod(f[2]),
+                energy:  parseNatureMod(f[3]),
+                note:    f[4] || '',
+            });
         } else if (line.startsWith('PLAN:')) {
             const f = p('PLAN:');
             if (f.length >= 2) data.plans.push({ date: f[0], desc: f[1] });
@@ -559,12 +623,12 @@ function parseTrackerData(text) {
 
 // ─── HTML BUILDER FOR TRACKER CARD ───────────────────────────────────────────
 
-function buildVitalsHTML(vitals) {
-    return VITAL_META.map(({ key, emoji, label, polarity }) => {
+function buildVitalsHTML(vitals, nature) {
+    return applyNatureToMeta(nature).map(({ key, emoji, label, polarity }) => {
         const v = vitals[key] || { val: 0, delta: '—' };
         const colorCls = vitalColorClass(polarity, v.val);
         const barWidth = polarity === 'arousal' ? Math.min(v.val, 100) : v.val;
-        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${emoji}</span><span class="enaenn-vital-label">${label}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${v.val}%</span><span class="enaenn-vital-delta">(${esc(v.delta)})</span></div>`;
+        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${esc(emoji)}</span><span class="enaenn-vital-label">${label}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${v.val}%</span><span class="enaenn-vital-delta">(${esc(v.delta)})</span></div>`;
     }).join('\n');
 }
 
@@ -597,7 +661,7 @@ function buildTrackerHTML(data, s) {
         const content = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(a => {
             const cond   = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
             const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
-            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals)}</div></details>${ssrHTML}${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
+            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals, findNature(data.nature, a.name))}</div></details>${ssrHTML}${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
         }).join('<div class="enaenn-agent-sep"></div>');
         tabs.push({ label: '💖 Present', content });
     }
@@ -615,8 +679,12 @@ function buildTrackerHTML(data, s) {
     if (showOffscreen) {
         const content = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(a => {
             const v = a.vitals;
+            const nat = findNature(data.nature, a.name);
+            const foodItem   = nat && nat.food.hide   ? '' : `${nat ? esc(nat.food.emoji)   : ''}🍴(${esc(v.hunger)})`;
+            const energyItem = nat && nat.energy.hide ? '' : `${nat ? esc(nat.energy.emoji) : ''}😴(${esc(v.energy)})`;
+            const vitalsLine = [foodItem, energyItem, `🚿(${esc(v.clean)})`, `🚽(${esc(v.bladder)})`, `💧(${esc(v.thirst)})`, `🔥(${esc(v.arousal)})`, `🧠(${esc(v.stress)})`].filter(Boolean).join(' | ');
             const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
-            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">🍴(${esc(v.hunger)}) | 😴(${esc(v.energy)}) | 🚿(${esc(v.clean)}) | 🚽(${esc(v.bladder)}) | 💧(${esc(v.thirst)}) | 🔥(${esc(v.arousal)}) | 🧠(${esc(v.stress)}) // 🎯 ${esc(a.impulse)}</div>${ssrHTML}</div>`;
+            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}</div><div class="enaenn-offscreen-vitals">${vitalsLine} // 🎯 ${esc(a.impulse)}</div>${ssrHTML}</div>`;
         }).join('');
         tabs.push({ label: '🌍 Off‑screen', content });
     }
@@ -653,18 +721,28 @@ function stripDailyLimitAnnotation(text) {
 }
 
 function formatTrackerForContext(raw) {
-    return stripDailyLimitAnnotation(raw).split('\n').map(line => {
+    const cleaned = stripDailyLimitAnnotation(raw);
+    const natureList = [];
+    for (const l of cleaned.split('\n')) {
+        const t = l.trim();
+        if (!t.startsWith('NATURE:')) continue;
+        const f = t.slice('NATURE:'.length).split('|').map(x => x.trim());
+        if (f.length >= 4) natureList.push({ agent: f[0], food: parseNatureMod(f[2]), energy: parseNatureMod(f[3]) });
+    }
+    return cleaned.split('\n').map(line => {
         const t = line.trim();
         if (!t) return line;
         if (t.startsWith('ONSCREEN:')) {
             const parts = t.slice('ONSCREEN:'.length).split('|').map(s => s.trim());
             if (parts.length < 19) return line;
             const vt = VITAL_META.map(m => m.text);
+            const nat = findNature(natureList, parts[1]);
             for (let i = 0; i < 7; i++) {
                 const rawVal = parts[3 + i].replace(/^[^\d-+.]+/, '');
                 const rawDel = parts[10 + i].replace(/^Δ\w+:/, '');
-                parts[3 + i]  = `${vt[i]}:${rawVal}`;
-                parts[10 + i] = `Δ${vt[i]}:${rawDel}`;
+                const hidden = nat && ((i === 0 && nat.food.hide) || (i === 1 && nat.energy.hide));
+                parts[3 + i]  = hidden ? `${vt[i]}:n/a` : `${vt[i]}:${rawVal}`;
+                parts[10 + i] = hidden ? `Δ${vt[i]}:n/a` : `Δ${vt[i]}:${rawDel}`;
             }
             return 'ONSCREEN: ' + parts.join(' | ');
         }
@@ -673,9 +751,11 @@ function formatTrackerForContext(raw) {
             const parts = t.slice('OFFSCREEN:'.length).split('|').map(s => s.trim());
             if (parts.length < 12) return line;
             const labels = ['food', 'energy', 'hygiene', 'bladder', 'thirst', 'arousal', 'stress'];
+            const nat = findNature(natureList, parts[1]);
             for (let i = 0; i < 7; i++) {
                 const rawVal = parts[4 + i].replace(/^\w+:/, '');
-                parts[4 + i] = `${labels[i]}:${rawVal}`;
+                const hidden = nat && ((i === 0 && nat.food.hide) || (i === 1 && nat.energy.hide));
+                parts[4 + i] = hidden ? `${labels[i]}:n/a` : `${labels[i]}:${rawVal}`;
             }
             return 'OFFSCREEN: ' + parts.join(' | ');
         }
@@ -1028,7 +1108,7 @@ function filterInjectionByCategory(text, s) {
         if (t.startsWith('ONSCREEN:')) return s.trackOnscreen !== false;
         if (t.startsWith('RELATIONSHIP:') || t.startsWith('REL:')) return s.trackRelationships !== false;
         if (t.startsWith('OFFSCREEN:')) return s.trackOffscreen !== false;
-        if (t.startsWith('SSR:')) return s.trackOnscreen !== false || s.trackOffscreen !== false;
+        if (t.startsWith('SSR:') || t.startsWith('NATURE:')) return s.trackOnscreen !== false || s.trackOffscreen !== false;
         return true;
     }).join('\n');
 }
