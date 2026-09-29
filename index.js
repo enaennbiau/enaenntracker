@@ -167,8 +167,15 @@ If such a resource exists for an agent, track it using this template instead of 
   Direction: infer whether it is LOW-critical (running out is bad) or HIGH-critical (accumulating is bad).
   Range: 0–100 unless the setting specifies otherwise.
   Replenish trigger(s): infer from the setting what in-fiction action restores it (feeding, meditation, resting at a shrine, a kill, casting downtime, etc.) and roughly how much per instance.
-  Passive drift: infer whether it decays/regenerates on its own over time, and at what rough rate — scale similarly to the pacing used for the standard vitals above.
-  Expenditure trigger(s): infer what actions consume it, and roughly how much per use.
+  Passive drift: pick the ONE type below that best fits the resource and use its FIXED rate (scale by your Step 1 time estimate). Do NOT invent other rates:
+    regen (mana, ki, stamina charge, spell slots, focus): +4%/hr normally; +10%/hr while resting, meditating or in a place that feeds it; +8%/hr asleep; +2%/hr during exertion or stress.
+    drain (a charge or reserve that burns away on its own — ambient charge, borrowed power, a fading pact): −2.5%/hr.
+    accum (HIGH-critical: corruption, taint, curse, rage, heat): no passive change; it changes only through events, and drops −1.5%/hr only if the setting establishes a way for it to bleed off (purification, cooling, calming).
+    static (sanity, faith, karma and similar): no passive change; event-only. Sanity-like resources recover +1.5%/hr only while the agent is calm and safe.
+  Expenditure trigger(s): anything that consumes the resource (or, for accum, raises it) costs the FIXED amount of the matching tier — pick the tier by the scale of the action, not by guessing a number:
+    trivial (minor use, brief display): 3% | moderate (combat spell or technique, healing a wound, short sustained effect): 10% | major (large spell, ritual, transformation): 25% | extreme (ultimate or mass effect, resurrection): 50%. An effect that is held over time: 2% per 5 min.
+  Numbers stated by the character card or world info override all of the fixed values above.
+  Type tag: add the chosen drift type (regen / drain / accum / static) as an extra FINAL field at the end of the SSR line. After the first snapshot, copy the type from the previous tracker state unchanged — never re-pick it.
   State label: a short in-fiction descriptor for the current tier (e.g. "Sated", "Peckish", "Starving", "Overcharged").
 
   BOOST: if replenishing the resource grants the agent a temporary supernatural or physical enhancement (strength, speed, healing, sharpened senses, stronger powers, etc.), track it the same way 🩹 conditions are tracked — concise text plus the approximate remaining duration, e.g. "Enhanced strength (~2h left)", "Abilities sharpened (~30min left)". Base the strength and duration of the boost on how much was gained and on the setting's own established rules. Show only when an active boost exists; otherwise omit it.
@@ -180,7 +187,7 @@ If such a resource exists for an agent, track it using this template instead of 
     • NEED that works like feeding (the agent weakens, starves or loses control without it, on a schedule — blood, flesh, emotions, life force, souls) → it becomes a modifier of 🍴 and replaces the human 🍴 rates for that agent.
     • NEED that works like rest or vigor → it becomes a modifier of 😴.
     • TOOL that is spent to do things (mana, ki, spell power, etc.) → SSR line, exactly as described above.
-    • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers adds extra drain to it. Do not also output a duplicate SSR line for it.
+    • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers drains it by the fixed Expenditure tier costs above. Do not also output a duplicate SSR line for it.
 
   Output one line per such agent, right before their SSR line (or where it would be):
   NATURE: [Name] | [species/type] | [🍴 modifier] | [😴 modifier] | [rule note, one short line]
@@ -191,7 +198,7 @@ If such a resource exists for an agent, track it using this template instead of 
     The character card's own stated rules ALWAYS override the reference rates below.
 
   Reference 🍴 rates for feeding needs (percent of the 0–100 bar; scale by your Step 1 time estimate):
-    Slow-burn feeder (classic vampire, blood-drinker): −1–2%/hr while resting, ×2–3 during exertion, power use or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
+    Slow-burn feeder (classic vampire, blood-drinker): −1–2%/hr while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
     Flesh-hungry (ghoul): −2–3%/hr. Fresh flesh: +40–70%.
     Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −3–5%/hr, faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
     Cyclical / predatory (werewolf): 🍴 stays human-standard (write -). Track the beast hunger, moon phase or transformation as a 🩹 condition with remaining duration, not as a 🍴 modifier.
@@ -602,6 +609,7 @@ function parseTrackerData(text) {
                 delta:    f[5] || '—',
                 state:    f[6] || '',
                 boost:    (f[7] && f[7] !== '-') ? f[7] : null,
+                type:     (f[8] || '').trim().toLowerCase(),
             });
         } else if (line.startsWith('NATURE:')) {
             const f = p('NATURE:');
