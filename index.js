@@ -82,7 +82,7 @@ STRICT OUTPUT RULES
 - Calculate and update previous tracker state values based on the current scene and STEPS described lower.
 - Output only the plain-text data lines defined in the OUTPUT FORMAT step. No HTML. No markdown. No code fences. No commentary.`;
     if (trackAnyAgents) {
-        strict += `\n- Never include {{user}} in the tracking. Track ONLY agents ({{char}}, side characters, significant NPCs)`;
+        strict += `\n- Never include {{user}} in the vital tracking. Track ONLY agents ({{char}}, side characters, significant NPCs)`;
     }
     strict += `\n- If no previous tracker state exists, initialize all values fresh from chat context.`;
     parts.push(strict);
@@ -91,7 +91,7 @@ STRICT OUTPUT RULES
     parts.push(`════════════════════════════════════
 STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
 ════════════════════════════════════
-Before touching any numbers, read the recent roleplay and estimate how much in-game time has passed between two last messages that have the time in it. Write your estimate mentally (e.g. "~25 minutes passed"). Use the actual rates below, and calculate it accordingly to the elapsed time between two last. Strictly AVOID lazily subtracting 1% per turn.`);
+Before touching any numbers, read the recent scene and estimate how much in-game time has passed between two last messages that have the time in it. Write your estimate mentally (e.g. "~25 minutes passed"). Use the actual rates below, and calculate it accordingly to the elapsed time between two last. Strictly AVOID lazily subtracting 1% per turn.`);
 
     // ── STEP 2 — presence sorting ───────────────────────────────────────
     if (trackOnscreen && trackOffscreen) {
@@ -139,6 +139,28 @@ RATES — scale these by your Step 1 time estimate:
 🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs. Halted during active stressors. Agent coping mechanisms may modify rate. 🧠 increases from unmet needs, social friction, danger, or active 🩹 conditions. High stress affects all "In The Moment" feelings and accelerates decay of 😴. 
 🔥  rises +2–8% per 5 min of stimulus (depends on psychological engagement, comfort, sensitivity). Decays ~−0.5% per 5 min. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. Sudden shock, fear, or extreme mood-killers cause an immediate 🔥 drop of −30-50% and more, depending on the severity. IMPORTANT: arousal can't go past 99% without actual physical stimulation. 
 
+     NON-HUMAN VITAL ADAPTATION (only for agents established as non-human: vampires, ghouls, werewolves, demons, spirits, fae, etc.)
+  Read the character card, world info and chat for what the creature needs in order to live or function. Sort every such need:
+    • NEED that works like feeding (the agent weakens, starves or loses control without it, on a schedule — blood, flesh, emotions, life force, souls) → it becomes a modifier of 🍴 and replaces the default 🍴 rates for that agent.
+    • NEED that works like rest or vigor → it becomes a modifier of 😴.
+    • TOOL that is spent to do things (mana, ki, spell power, etc.) → SSR line, exactly as described at STEP 3.5.
+    • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers drains it by the fixed Expenditure tier costs above. Do not also output a duplicate SSR line for it.
+
+  Reference 🍴 rates for feeding needs (percent of the 0–100 bar; scale by your Step 1 time estimate):
+    Slow-burn feeder (classic vampire, blood-drinker): −1–2%/hr while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
+    Flesh-hungry (ghoul): −2–3%/hr. Fresh flesh: +40–70%.
+    Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −3–5%/hr, faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
+    Cyclical / predatory (werewolf): 🍴 stays human-standard (write -). Track the beast hunger, moon phase or transformation as a 🩹 condition with remaining duration, not as a 🍴 modifier.
+    Ordinary human food, for a creature that does not live on it: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
+  Reference 😴 adaptations: nocturnal or day-sleeping creatures use the normal sleep and decay rates but shifted to their own cycle; creatures that recharge from a place, ritual or ambient source (per the card) regain 😴 there instead of by sleeping. If the card gives nothing specific, keep the standard 😴 rates.
+
+   Also output one line per such agent, right before their SSR line:
+  NATURE: [Name] | [species/type] | [🍴 modifier] | [😴 modifier] | [rule note, one short line]
+    Modifier = ONE fitting emoji shown in front of the base emoji of modified vital. Write hide if that vital does not apply to the agent at all; for a hidden vital still output 0 in its value slot and — in its delta slot.
+    Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Blood only; human food gives ~0–5%; sleeps by day").
+    hide applies ONLY to creatures that truly have no such need: purely spiritual/infernal demons (hellborn fiends, bound or summoned demons, demon lords in true form), and undead/constructs that neither feed nor sleep (skeletons, wraiths, golems). Demons that DO feed — succubi/incubi, dream- or emotion-eaters, soul-eaters, gluttony/hunger demons — get a modifier, not hide.
+    Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the narrative establishes a change (turned, cursed, cured, transformed permanently). Never apply it to humans.
+
 SUBSTANCE USE ADJUSTMENTS:
     Caffeine: 😴 +10–15% (halts decay 1–2 hrs), after 1-2hrs 😴 -20%. 💧/🚽 rise rates ×1.5. 🧠 decay slows (adds friction) if overused.
     Alcohol: 🧠 immediate −10–20% (rapid stress relief). 💧/🚽 rise rates x2. 😴 decay accelerates (×1.5) after 1–2 hrs (during crash).
@@ -177,33 +199,11 @@ If such a resource exists for an agent, track it using this template instead of 
   Numbers stated by the character card or world info override all of the fixed values above.
   Type tag: add the chosen drift type (regen / drain / accum / static) as an extra FINAL field at the end of the SSR line. After the first snapshot, copy the type from the previous tracker state unchanged — never re-pick it.
   State label: a short in-fiction descriptor for the current tier (e.g. "Sated", "Peckish", "Starving", "Overcharged").
+ The agent description's own stated rules ALWAYS override the reference rates
 
   BOOST: if replenishing the resource grants the agent a temporary supernatural or physical enhancement (strength, speed, healing, sharpened senses, stronger powers, etc.), track it the same way 🩹 conditions are tracked — concise text plus the approximate remaining duration, e.g. "Enhanced strength (~2h left)", "Abilities sharpened (~30min left)". Base the strength and duration of the boost on how much was gained and on the setting's own established rules. Show only when an active boost exists; otherwise omit it.
 
-  If multiple agents have different resource types, track each independently — do not conflate them into one shared value.
-
-  ── NON-HUMAN VITAL ADAPTATION (only for agents established as non-human: vampires, ghouls, werewolves, demons, spirits, fae, etc.) ──
-  Read the character card, world info and chat for what the creature needs in order to live or function. Sort every such need:
-    • NEED that works like feeding (the agent weakens, starves or loses control without it, on a schedule — blood, flesh, emotions, life force, souls) → it becomes a modifier of 🍴 and replaces the human 🍴 rates for that agent.
-    • NEED that works like rest or vigor → it becomes a modifier of 😴.
-    • TOOL that is spent to do things (mana, ki, spell power, etc.) → SSR line, exactly as described above.
-    • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers drains it by the fixed Expenditure tier costs above. Do not also output a duplicate SSR line for it.
-
-  Output one line per such agent, right before their SSR line (or where it would be):
-  NATURE: [Name] | [species/type] | [🍴 modifier] | [😴 modifier] | [rule note, one short line]
-    Modifier = ONE emoji shown in front of the base emoji (🩸 → 🩸🍴, ✨ → ✨😴). Write - if that vital stays human-standard. Write hide if that vital does not apply to the agent at all; for a hidden vital still output 0 in its value slot and — in its delta slot.
-    Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Blood only; human food gives ~0–5%; sleeps by day").
-    hide applies ONLY to creatures that truly have no such need: purely spiritual/infernal demons (hellborn fiends, bound or summoned demons, demon lords in true form), and undead/constructs that neither feed nor sleep (skeletons, wraiths, golems). Demons that DO feed — succubi/incubi, dream- or emotion-eaters, soul-eaters, gluttony/hunger demons — get a modifier, not hide.
-    Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the narrative establishes a change (turned, cursed, cured, transformed permanently). Never apply it to humans.
-    The character card's own stated rules ALWAYS override the reference rates below.
-
-  Reference 🍴 rates for feeding needs (percent of the 0–100 bar; scale by your Step 1 time estimate):
-    Slow-burn feeder (classic vampire, blood-drinker): −1–2%/hr while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
-    Flesh-hungry (ghoul): −2–3%/hr. Fresh flesh: +40–70%.
-    Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −3–5%/hr, faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
-    Cyclical / predatory (werewolf): 🍴 stays human-standard (write -). Track the beast hunger, moon phase or transformation as a 🩹 condition with remaining duration, not as a 🍴 modifier.
-    Ordinary human food, for a creature that does not live on it: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
-  Reference 😴 adaptations: nocturnal or day-sleeping creatures use the normal sleep and decay rates but shifted to their own cycle; creatures that recharge from a place, ritual or ambient source (per the card) regain 😴 there instead of by sleeping. If the card gives nothing specific, keep the standard 😴 rates.`);
+  If multiple agents have different resource types, track each independently — do not conflate them into one shared value.`);
     }
 
     // ── STEP 4 — relationships ──────────────────────────────────────────
