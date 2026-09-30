@@ -152,10 +152,10 @@ Read the character card, world info and chat for what the creature needs in orde
 </need_sorting>
 
 <feeding_rates>
-Reference 🍴 rates for feeding needs (percent of the 0–100 bar; scale by your Step 1 time estimate):
-  Slow-burn feeder (classic vampire, blood-drinker): −1–2%/hr while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
-  Flesh-hungry (ghoul): −2–3%/hr. Fresh flesh: +40–70%.
-  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −3–5%/hr, faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
+Reference 🍴 rates for feeding needs (percent of the 0–100 bar). Multiply the per-5-min rate by the number of 5-minute blocks from your Step 1 estimate — never apply it as a flat per-turn amount, and never round a small per-5-min rate up to 0.1 or a whole number; keep two decimals:
+  Slow-burn feeder (classic vampire, blood-drinker): −0.08–0.17% per 5 min (−1–2%/hr) while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
+  Flesh-hungry (ghoul): −0.17–0.25% per 5 min (−2–3%/hr). Fresh flesh: +40–70%.
+  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −0.25–0.42% per 5 min (−3–5%/hr), faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
   Cyclical / predatory (werewolf): 🍴 stays human-standard (write -). Track the beast hunger, moon phase or transformation as a 🩹 condition with remaining duration, not as a 🍴 modifier.
   Ordinary human food, for a creature that does not live on it: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
 </feeding_rates>
@@ -213,11 +213,11 @@ If such a resource exists for an agent, track it using this template instead of 
 </resource_template>
 
 <passive_drift>
-Pick the ONE type below that best fits the resource and use its FIXED rate (scale by your Step 1 time estimate). Do NOT invent other rates:
-  regen (mana, ki, stamina charge, spell slots, focus): +4%/hr normally; +10%/hr while resting, meditating or in a place that feeds it; +8%/hr asleep; +2%/hr during exertion or stress.
-  drain (a charge or reserve that burns away on its own — ambient charge, borrowed power, a fading pact): −2.5%/hr.
-  accum (HIGH-critical: corruption, taint, curse, rage, heat): no passive change; it changes only through events, and drops −1.5%/hr only if the setting establishes a way for it to bleed off (purification, cooling, calming).
-  static (sanity, faith, karma and similar): no passive change; event-only. Sanity-like resources recover +1.5%/hr only while the agent is calm and safe.
+Pick the ONE type below that best fits the resource and use its FIXED rate. Multiply the per-5-min rate by the number of 5-minute blocks from your Step 1 estimate — never apply it as a flat per-turn amount, and never round a small per-5-min rate up to 0.1 or a whole number; keep two decimals. Do NOT invent other rates:
+  regen (mana, ki, stamina charge, spell slots, focus): +0.33% per 5 min (+4%/hr) normally; +0.83% per 5 min (+10%/hr) while resting, meditating or in a place that feeds it; +0.67% per 5 min (+8%/hr) asleep; +0.17% per 5 min (+2%/hr) during exertion or stress.
+  drain (a charge or reserve that burns away on its own — ambient charge, borrowed power, a fading pact): −0.21% per 5 min (−2.5%/hr).
+  accum (HIGH-critical: corruption, taint, curse, rage, heat): no passive change; it changes only through events, and drops −0.13% per 5 min (−1.5%/hr) only if the setting establishes a way for it to bleed off (purification, cooling, calming).
+  static (sanity, faith, karma and similar): no passive change; event-only. Sanity-like resources recover +0.13% per 5 min (+1.5%/hr) only while the agent is calm and safe.
 </passive_drift>
 
 <expenditure>
