@@ -151,14 +151,13 @@ Read the character card, world info and chat for what the creature needs in orde
   • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers drains it by the fixed expenditure tier costs from STEP 3.5. Do not also output a duplicate SSR line for it.
 </need_sorting>
 
-<feeding_rates>
-Reference 🍴 rates for feeding needs (percent of the 0–100 bar). Multiply the per-5-min rate by the number of 5-minute blocks from your Step 1 estimate — never apply it as a flat per-turn amount, and never round a small per-5-min rate up to 0.1 or a whole number; keep two decimals:
-  Slow-burn feeder (classic vampire, blood-drinker): −0.08–0.17% per 5 min (−1–2%/hr) while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
-  Flesh-hungry (ghoul): −0.17–0.25% per 5 min (−2–3%/hr). Fresh flesh: +40–70%.
-  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): −0.25–0.42% per 5 min (−3–5%/hr), faster while isolated. An intense encounter: +5–15%, depending on the strength and quality of the emotion.
-  Cyclical / predatory (werewolf): 🍴 stays human-standard (write -). Track the beast hunger, moon phase or transformation as a 🩹 condition with remaining duration, not as a 🍴 modifier.
-  Ordinary human food, for a creature that does not live on it: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
-</feeding_rates>
+<satiation_rates>
+Supernatural 🍴 rates for feeding needs (percent of the 0–100 bar):
+  Slow-burn feeder (classic vampire, blood-drinker): 🍴 decays −0.08–0.17% per 5 min (−1–2%/hr) while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
+  Flesh-hungry (ghoul): decays −0.17–0.25% per 5 min (−2–3%/hr). Fresh flesh: +40–70%.
+  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): decays −0.25–0.42% per 5 min (−3–5%/hr), faster while isolated. An intense encounter: +15–35%, depending on the strength and quality of the emotion.
+  Ordinary human food, for a creature that doesn't require it to survive: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
+</satiation_rates>
 
 <energy_rates>
 Reference 😴 adaptations: nocturnal or day-sleeping creatures use the normal sleep and decay rates but shifted to their own cycle; creatures that recharge from a place, ritual or ambient source (per the card) regain 😴 there instead of by sleeping. If the card gives nothing specific, keep the standard 😴 rates.
@@ -167,7 +166,7 @@ Reference 😴 adaptations: nocturnal or day-sleeping creatures use the normal s
 <nature_line_rules>
 Also output one NATURE line per such agent, right before their SSR line (template in OUTPUT FORMAT).
   Modifier = ONE fitting emoji shown in front of the base emoji of the modified vital (output only 🩸 — the tracker displays it as 🩸🍴; never write 🍴 or 😴 inside the modifier). Write - if that vital stays human-standard. Write hide if that vital does not apply to the agent at all; for a hidden vital still output 0 in its value slot and — in its delta slot.
-  Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Blood only; human food gives ~0–5%; sleeps by day").
+  Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Feeds on blood only; human food restores ~0–5%; sleeps by day").
   hide applies ONLY to creatures that truly have no such need: purely spiritual/infernal demons (hellborn fiends, bound or summoned demons, demon lords in true form), and undead/constructs that neither feed nor sleep (skeletons, wraiths, golems). Demons that DO feed — succubi/incubi, dream- or emotion-eaters, soul-eaters, gluttony/hunger demons — get a modifier, not hide.
   Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the narrative establishes a change (turned, cursed, cured, transformed permanently).
   The character card's own stated rules ALWAYS override the reference rates above.
