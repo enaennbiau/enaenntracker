@@ -313,7 +313,7 @@ LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for 
         outFmt += `
 
 [One ONSCREEN line per agent physically present in the scene. Never track user's vitals. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
-ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [impulse] | [condition or -]
+ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [condition or -]
 
   Vital values: integers 0–100 (arousal 0–200).
   Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
@@ -363,8 +363,8 @@ PLAN: [date] | [description]`;
 LOC: {{user}} stands in the doorway of her dorm room. The courier waits in the hallway with a tablet. Kevin is splayed on her bed.`;
     if (trackOnscreen) {
         example += `
-ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | Complete delivery efficiently | -
-ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | Wait for her to return into the bed | —`;
+ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | -
+ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | —`;
     }
     if (trackRelationships) {
         example += `
@@ -611,7 +611,9 @@ function parseTrackerData(text) {
             data.location = line.slice(4).trim();
         } else if (line.startsWith('ONSCREEN:')) {
             const f = p('ONSCREEN:');
-            if (f.length < 19) continue;
+            if (f.length < 18) continue;
+            // Legacy lines (19 fields) carry an impulse at index 17; it is ignored.
+            const condIdx = f.length >= 19 ? 18 : 17;
             data.agents.push({
                 gender: f[0], name: f[1], attire: f[2],
                 vitals: {
@@ -623,8 +625,7 @@ function parseTrackerData(text) {
                     arousal:     { val: numVal(f[8]),  delta: f[15] },
                     stress:      { val: numVal(f[9]),  delta: f[16] },
                 },
-                impulse:   f[17] || '',
-                condition: (f[18] && f[18] !== '-') ? f[18] : null,
+                condition: (f[condIdx] && f[condIdx] !== '-') ? f[condIdx] : null,
             });
         } else if (line.startsWith('RELATIONSHIP:') || line.startsWith('REL:')) {
             const prefix = line.startsWith('RELATIONSHIP:') ? 'RELATIONSHIP:' : 'REL:';
@@ -678,11 +679,15 @@ function parseTrackerData(text) {
 // ─── HTML BUILDER FOR TRACKER CARD ───────────────────────────────────────────
 
 function buildVitalsHTML(vitals, nature) {
-    return applyNatureToMeta(nature).map(({ key, emoji, label, polarity }) => {
+    const meta = applyNatureToMeta(nature);
+    // A stacked emoji (🩸🍴) needs a wider icon column; widen it for every row
+    // of this agent so the bars stay aligned.
+    const wide = meta.some(m => [...m.emoji.replace(/\uFE0F/g, '')].length > 1) ? ' enaenn-vital-emoji-wide' : '';
+    return meta.map(({ key, emoji, label, polarity }) => {
         const v = vitals[key] || { val: 0, delta: '—' };
         const colorCls = vitalColorClass(polarity, v.val);
         const barWidth = polarity === 'arousal' ? Math.min(v.val, 100) : v.val;
-        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${esc(emoji)}</span><span class="enaenn-vital-label">${label}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${v.val}%</span><span class="enaenn-vital-delta">(${esc(v.delta)})</span></div>`;
+        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji${wide}">${esc(emoji)}</span><span class="enaenn-vital-label">${label}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${v.val}%</span><span class="enaenn-vital-delta">(${esc(v.delta)})</span></div>`;
     }).join('\n');
 }
 
@@ -715,7 +720,9 @@ function buildTrackerHTML(data, s) {
         const content = data.agents.length === 0 ? '<div class="enaenn-alone-msg">No agents present.</div>' : data.agents.map(a => {
             const cond   = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
             const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
-            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals, findNature(data.nature, a.name))}</div></details>${ssrHTML}${cond}<div class="enaenn-impulse">🎯 ${esc(a.impulse)}</div></div>`;
+            const nat = findNature(data.nature, a.name);
+            const natureLine = nat ? `<div class="enaenn-impulse">🧬 ${esc(nat.species)}${nat.note ? ' — ' + esc(nat.note) : ''}</div>` : '';
+            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span><span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span></div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals, findNature(data.nature, a.name))}</div></details>${ssrHTML}${cond}${natureLine}</div>`;
         }).join('<div class="enaenn-agent-sep"></div>');
         tabs.push({ label: '💖 Present', content });
     }
@@ -788,7 +795,8 @@ function formatTrackerForContext(raw) {
         if (!t) return line;
         if (t.startsWith('ONSCREEN:')) {
             const parts = t.slice('ONSCREEN:'.length).split('|').map(s => s.trim());
-            if (parts.length < 19) return line;
+            if (parts.length < 18) return line;
+            if (parts.length >= 19) parts.splice(17, 1);   // drop legacy impulse
             const vt = VITAL_META.map(m => m.text);
             const nat = findNature(natureList, parts[1]);
             for (let i = 0; i < 7; i++) {
