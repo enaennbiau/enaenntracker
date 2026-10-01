@@ -155,7 +155,7 @@ Read the character card, world info and chat for what the creature needs in orde
 Supernatural 🍴 rates for feeding needs (percent of the 0–100 bar):
   Slow-burn feeder (classic vampire, blood-drinker): 🍴 decays −0.08–0.17% per 5 min (−1–2%/hr) while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
   Flesh-hungry (ghoul): decays −0.17–0.25% per 5 min (−2–3%/hr). Fresh flesh: +40–70%.
-  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): decays −0.25–0.42% per 5 min (−3–5%/hr), faster while isolated. An intense encounter: +15–35%, depending on the strength and quality of the emotion.
+  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): decays −0.25–0.42% per 5 min (−3–5%/hr), faster while isolated. A single encounter:  +20-30% depending on the strength and quality of the emotion.
   Ordinary human food, for a creature that doesn't require it to survive: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
 </satiation_rates>
 
