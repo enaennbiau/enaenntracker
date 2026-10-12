@@ -332,10 +332,10 @@ REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | 
         outFmt += `
 
 [One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.${trackOnscreen ? ' Move OFFSCREEN to ONSCREEN if agent participates in the current scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
-OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse (vitals-related only)]
+OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse (vital-related only, e.g. 'visit bathroom')]
   Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm`;
     }
-
+i
     if (trackOnscreen || trackOffscreen) {
         outFmt += `
 
