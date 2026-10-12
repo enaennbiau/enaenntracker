@@ -306,7 +306,7 @@ OUTPUT FORMAT (plain text only)
 
 Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields separated by " | ".
 
-LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for each present agent' : ' relevant to the scene'}]`;
+LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for each on-screen agent' : ' relevant to the scene'}]`;
 
     if (trackOnscreen) {
         outFmt += `
@@ -332,7 +332,7 @@ REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | 
         outFmt += `
 
 [One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.${trackOnscreen ? ' Move OFFSCREEN to ONSCREEN if agent participates in the current scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
-OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse]
+OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse (vitals-related only)]
   Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm`;
     }
 
@@ -352,7 +352,7 @@ SSR: [Name] | [emoji] | [resource label] | [value 0–100] | [low or high] | [Δ
 
     outFmt += `
 
-[Only if upcoming plans exist:]
+[Signifigant upcoming plans and/or official holidays in the country:]
 PLAN: [date] | [description]`;
 
     parts.push(outFmt);
