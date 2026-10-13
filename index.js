@@ -45,6 +45,8 @@ const DEFAULT_SETTINGS = {
     trackOnscreen:      true,          // ONSCREEN agents (present in the scene)
     trackRelationships: true,          // REL relationship tracking
     trackOffscreen:     true,          // OFFSCREEN agents (not in the scene)
+    fixatedAgents:      '',            // comma-separated names exempt from the off-screen anti-orbit filter
+    volatileAgents:     '',            // comma-separated names: wider daily relationship limit (enforced in code)
 
     // ─── Local backup (survives Enabled being switched off) ───────────────
     lastLocalBackupAt:  null,
@@ -73,13 +75,13 @@ function buildTrackerSystemPrompt(s) {
     const parts = [];
 
     // ── Header ──────────────────────────────────────────────────────────
-    parts.push(`You are a meticulous silent background tracker for a collaborative simulation. Your job is to track ${trackAnyAgents ? 'the state of agents ({{char}}, side agents, and significant NPCs)' : 'simulation state such as location and pacing'}. Read the previous tracker state and recent narration, calculate elapsed in-simulation time between the latest messages, and update tracker state block in plain-text format. Be precise about the vital calculations — think deeply and carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.`);
+    parts.push(`You are a meticulous silent background tracker for a collaborative simulation. Your job is to track ${trackAnyAgents ? 'the state of agents ({{char}}, side agents, and significant NPCs)' : 'simulation state such as location and pacing'}. Read the previous tracker state, the system facts and the recent narration, and update the tracker state block in plain-text format. The system calculates every number for you (time, vitals, daily limits) — your job is to report precisely and honestly what actually happened. Think carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.`);
 
     // ── Strict output rules ─────────────────────────────────────────────
     let strict = `════════════════════════════════════
 STRICT OUTPUT RULES
 ════════════════════════════════════
-- Calculate and update previous tracker state values based on the current scene and STEPS described lower.
+- Update the previous tracker state based on the current scene, the SYSTEM FACTS and the STEPS described lower. Never calculate or output numbers that the system calculates.
 - Output only the plain-text data lines defined in the OUTPUT FORMAT step. No HTML. No markdown. No code fences. No commentary.`;
     if (trackAnyAgents) {
         strict += `\n- Never include {{user}} in the vital tracking. Track ONLY agents ({{char}}, side characters, significant NPCs)`;
@@ -89,9 +91,9 @@ STRICT OUTPUT RULES
 
     // ── STEP 1 — time ───────────────────────────────────────────────────
     parts.push(`════════════════════════════════════
-STEP 1 — ESTIMATE ELAPSED IN-GAME TIME
+STEP 1 — TIME (PROVIDED BY THE SYSTEM)
 ════════════════════════════════════
-Before touching any numbers, read the recent scene and estimate how much in-game time has passed between two last messages that have the time in it. Write your estimate mentally (e.g. "~25 minutes passed"). Use the actual rates below, and calculate it accordingly to the elapsed time between two last. Strictly AVOID lazily subtracting 1% per turn.`);
+The system reads the in-game date and time from the story's own header and tells you, in SYSTEM FACTS, what time it is now and how much time passed since the previous update. Do NOT estimate, calculate or output time. Use it for anything that depends on timing: what people are doing, conditions, plans, promises.`);
 
     // ── STEP 2 — presence sorting ───────────────────────────────────────
     if (trackOnscreen && trackOffscreen) {
@@ -115,83 +117,63 @@ On-screen presence tracking is disabled in this configuration. Track significant
     // ── STEP 3 — vitals ─────────────────────────────────────────────────
     if (trackOnscreen || trackOffscreen) {
         let step3 = `<step_3_vitals>
-STEP 3 — VITAL CALCULATION RULES
+STEP 3 — VITALS (CALCULATED BY THE SYSTEM)
 
-<default_vitals>
-LOW-critical vitals (🍴 food/satiation, 😴 energy, 🚿 hygiene) — low values are bad:
-  Output integers 0–100. Severity reference: ≥50% = ok; 25.1–29.9% = warn; <25% = critical.
+The system calculates 🍴 food, 😴 energy, 🚿 hygiene, 💧 thirst and 🚽 bladder from the in-game time that passed, each agent's activity and the events you report. NEVER calculate or output those numbers (except once, for an agent's first appearance — see OUTPUT FORMAT). You report only what the narration shows:
 
-HIGH-critical vitals (💧 thirst, 🚽 bladder, 🧠 stress) — high values are bad:
-  Output integers 0–100. Severity reference: ≤50% = ok; 70–74.9% = warn; ≥75% = critical.
+ACTIVITY (one word per on-screen agent): sleep | rest (awake, minimal movement) | normal | exert (heavy effort: sport, fighting, hard labor, strenuous or hot work).
 
-EXCEPTION (🔥 arousal) - the higher, the worse critical thinking, and thicker mental fog is:
-  Output integers 0–200. 0–99%: Mental arousal and biochemical response. 101-199%: ONLY WHEN physical stimulation of nerve endings and active motor response (touch, friction, or muscle tension). 200% ALWAYS triggers climax. 
-  
-  🩹 conditions:  Append the approximate remaining duration to the ACTIVE condition(s), e.g., “Drunk (~2h left)”, “MDMA high (~5h left)”, “Sick (~5 days until better)”, and so on. Base durations on real pharmacokinetics—alcohol clears at ~1 drink/hour, MDMA lasts 3–6h (use 4.5h unless dose is specified), a cold lasts 7–10 days (cough may linger longer), a broken leg heals in ~6–12 weeks (full recovery up to a year).
+EVENTS (what actually happened to the agent since the previous state, "-" if nothing). Comma-separated tags:
+  meal, snack | sip, glass, bottle (water) | drinks (drank with a meal) | shower, wash (quick wash), clothes (changed into clean clothes) | pee (used the toilet)
+  caffeine, alcohol, nicotine, cannabis, stimulant (cocaine, amphetamines), opioid (heavy sedatives), psychedelic (LSD, shrooms) | feed, drain (non-human feeding, see below)
+  Anything else that changes a vital (sex, exertion beyond the activity, a shock, an injury...) → an adjustment tag: food, energy, hyg, thirst, bladder, arousal or stress followed by a signed number, e.g. hyg-15, bladder+10, arousal-40. Keep adjustments modest and justified by the narration.
+  One tag per real event, reported once — never repeat an event that the previous state already accounts for.
 
-RATES — scale these by your Step 1 time estimate:
-🍴  decay −0.9–1.3% (when awake, but minimal movement) / −1.6–2.1% (during normal functioning) / −0.5–0.8% (during sleep) per 5 min  (−11–15% (awake, but minimal movement) / −19–25% (normal functioning) / −6–10% (asleep) /hr). Meal: +60–80%. Snack: +10–17%.
-😴  decay −0.41–0.45% per 5 min (−5-5.4%/hr, normal); −0.56–0.59% per 5 min (stressed).
-    Sleep: +10–15%/hr. 
-🚿  decay −0.05–0.15% per 5 min (×3–4 during exertion/heat).
-    Shower: +95–100%. Quick wash: +5–10%. Clean clothes +3-5%. Swimming may restore or reduce 🚿 depending on the water source.
-💧/🚽 rise +0.3–0.7% per 5 min. Caffeine/alcohol/heat/exercise accelerate 💧. Glass of water: 💧 −45-55%, 🚽 +20-30%. Meal w/ drinks: 💧 −30-45%. One sip: 💧 −10-15%. Bottle of water: -100, 🚽 +40-60.
-🧠  decays −0.3–0.5% per 5 min during restful/positive events. Rises from friction, danger, unmet needs. Halted during active stressors. Agent coping mechanisms may modify rate. 🧠 increases from unmet needs, social friction, danger, or active 🩹 conditions. High stress affects all "In The Moment" feelings and accelerates decay of 😴. 
-🔥  rises +2–8% per 5 min of stimulus (depends on psychological engagement, comfort, sensitivity). Decays ~−0.5% per 5 min. Anxious/distracted → slower or plateau. Decay (no stimulus): ~-0.5%/5min. Sudden shock, fear, or extreme mood-killers cause an immediate 🔥 drop of −30-50% and more, depending on the severity. IMPORTANT: arousal can't go past 99% without actual physical stimulation. 
-</default_vitals>
+🧠 STRESS (0–100) and 🔥 AROUSAL (0–200) are yours to judge; the system limits how fast they can move.
+  🧠 rises from friction, danger, unmet needs or active 🩹 conditions, halts during active stressors, and eases during restful or positive events. Agent coping mechanisms may modify this. High stress affects all "In The Moment" feelings.
+  🔥 0–99: mental arousal and biochemical response. 101–199: ONLY WHEN there is actual physical stimulation of nerve endings and active motor response (touch, friction, muscle tension). 200 ALWAYS triggers climax. It rises gradually with stimulus (depends on psychological engagement, comfort, sensitivity); anxious or distracted → slower or a plateau; a sudden shock, fear or an extreme mood-killer causes an immediate drop of 30–50 or more, depending on severity. IMPORTANT: arousal can't go past 99 without actual physical stimulation. The higher it is, the worse the critical thinking and the thicker the mental fog.
+
+🩹 CONDITIONS: track injuries, intoxication, illness, pain, medication, temperature discomfort, substance use. Show only active conditions. When a condition first appears, write the approximate remaining duration, e.g. "Drunk (~2h left)", "MDMA high (~5h left)", "Sick (~5 days until better)", based on real pharmacokinetics (alcohol clears at ~1 drink/hour, MDMA lasts 3–6h — use 4.5h unless the dose is specified, a cold lasts 7–10 days, a broken leg heals in ~6–12 weeks). After that copy the condition text unchanged while it lasts: the system counts the time down and removes the condition when it ends. Write a new duration only for a new condition or a renewed dose.
 
 <non_human_adaptation>
 NON-HUMAN VITAL ADAPTATION — applies ONLY to agents established as non-human (vampires, ghouls, werewolves, demons, spirits, fae, etc.). Never apply it to humans. Everything outside this block works the same for every agent.
 
 <need_sorting>
 Read the character card, world info and chat for what the creature needs in order to live or function. Sort every such need:
-  • NEED that works like feeding (the agent weakens, starves or loses control without it, on a schedule — blood, flesh, emotions, life force, souls) → it becomes a modifier of 🍴 and replaces the default 🍴 rates for that agent.
+  • NEED that works like feeding (the agent weakens, starves or loses control without it, on a schedule — blood, flesh, emotions, life force, souls) → it becomes a modifier of 🍴 and replaces the default 🍴 behavior for that agent.
   • NEED that works like rest or vigor → it becomes a modifier of 😴.
   • TOOL that is spent to do things (mana, ki, spell power, etc.) → SSR line, exactly as described at STEP 3.5.
-  • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers drains it by the fixed expenditure tier costs from STEP 3.5. Do not also output a duplicate SSR line for it.
+  • Both (e.g. vitae that sustains AND fuels powers) → ONE value only, on the 🍴 bar; using powers drains it. Do not also output a duplicate SSR line for it.
 </need_sorting>
 
-<satiation_rates>
-Supernatural 🍴 rates for feeding needs (percent of the 0–100 bar):
-  Slow-burn feeder (classic vampire, blood-drinker): 🍴 decays −0.08–0.17% per 5 min (−1–2%/hr) while resting, ×2–3 during exertion or wounds (empties over ~2–4 days). Feeding: +25–50%; draining a victim fully: +60–80%.
-  Flesh-hungry (ghoul): decays −0.17–0.25% per 5 min (−2–3%/hr). Fresh flesh: +40–70%.
-  Emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers): decays −0.25–0.42% per 5 min (−3–5%/hr), faster while isolated. A single encounter:  +20-30% depending on the strength and quality of the emotion.
-  Ordinary human food, for a creature that doesn't require it to survive: +0–5% at most, or nausea/sickness as a 🩹 condition, unless the card says otherwise.
-</satiation_rates>
-
-<energy_rates>
-Reference 😴 adaptations: nocturnal or day-sleeping creatures use the normal sleep and decay rates but shifted to their own cycle; creatures that recharge from a place, ritual or ambient source (per the card) regain 😴 there instead of by sleeping. If the card gives nothing specific, keep the standard 😴 rates.
-</energy_rates>
+<feeder_type>
+For a feeding need choose the feeder type — the system applies the matching rates and gains:
+  slow — slow-burn feeder (classic vampire, blood-drinker; empties over ~2–4 days)
+  flesh — flesh-hungry (ghoul)
+  emotion — emotion / life-force feeder (succubus, incubus, dream-eater, wraith-like drainers; empties faster)
+  none — no feeding need
+Report feedings with the events: feed (an ordinary feeding) or drain (draining a victim fully). Ordinary human food gives such a creature almost nothing (the system applies this), unless the card says otherwise.
+Nocturnal or day-sleeping creatures simply report their activity as sleep when they sleep. Creatures that recharge from a place, ritual or ambient source (per the card) report such recharging with an energy+N adjustment tag.
+</feeder_type>
 
 <nature_line_rules>
 Also output one NATURE line per such agent, right before their SSR line (template in OUTPUT FORMAT).
-  Modifier = ONE fitting emoji shown in front of the base emoji of the modified vital (output only 🩸 — the tracker displays it as 🩸🍴; never write 🍴 or 😴 inside the modifier). Write - if that vital stays human-standard. Write hide if that vital does not apply to the agent at all; for a hidden vital still output 0 in its value slot and — in its delta slot.
+  Modifier = ONE fitting emoji shown in front of the base emoji of the modified vital (output only 🩸 — the tracker displays it as 🩸🍴; never write 🍴 or 😴 inside the modifier). Write - if that vital stays human-standard. Write hide if that vital does not apply to the agent at all (the system then shows 0 and skips it).
   Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Feeds on blood only; human food restores ~0–5%; sleeps by day").
+  The final field is the feeder type (slow / flesh / emotion / none).
   hide applies ONLY to creatures that truly have no such need: purely spiritual/infernal demons (hellborn fiends, bound or summoned demons, demon lords in true form), and undead/constructs that neither feed nor sleep (skeletons, wraiths, golems). Demons that DO feed — succubi/incubi, dream- or emotion-eaters, soul-eaters, gluttony/hunger demons — get a modifier, not hide.
   Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the narrative establishes a change (turned, cursed, cured, transformed permanently).
-  The character card's own stated rules ALWAYS override the reference rates above.
+  The system uses fixed standard rates; if the character card states exact rules, mention them in the rule note and report events accordingly.
 </nature_line_rules>
 </non_human_adaptation>
-
-<substance_use>
-SUBSTANCE USE ADJUSTMENTS:
-    Caffeine: 😴 +10–15% (halts decay 1–2 hrs), after 1-2hrs 😴 -20%. 💧/🚽 rise rates ×1.5. 🧠 decay slows (adds friction) if overused.
-    Alcohol: 🧠 immediate −10–20% (rapid stress relief). 💧/🚽 rise rates x2. 😴 decay accelerates (×1.5) after 1–2 hrs (during crash).
-    Nicotine: 🧠 instant −5–10% (halts stress rise). 🍴 decay halved for ~1 hr (appetite suppressant).
-    Cannabis: 🍴 decay ×2–3 (munchies). 💧 accelerates (cottonmouth). 🧠 immediate −15–25% (but rapid rise if paranoia triggers). 😴 decay ×1.5.
-    Stimulants (Cocaine/Amphetamines): 😴 instant +30–50% (halts decay 2–6 hrs). 🍴 decay halted. 🔥 rise ×2. Crash: 😴 instant −40%, 🧠 spikes rapidly.
-    Opioids/Heavy Sedatives: 🧠 forces rapid decay to near 0 (total numbness). 🩹 completely nullifies active conditions. 😴 decay ×2–3 (extreme sedation).
-    Psychedelics (LSD/Shrooms): 🧠 highly volatile (locks to rapid decay or rapid rise). 🍴 and 😴 decay halted during trip (6–8 hrs), followed by complete 😴 exhaustion.
-</substance_use>
-
-Round the calculated results to a maximum of two decimal places.
-NEED PRIORITY when critical: 🚽 > 💧 > 🍴 > 😴 > 🚿.
-Multiple vitals shift at once from events (sex: drops 🚿🍴🔥, raises 🚽💧; exertion: drops 😴🚿, raises 🚽💧🧠, etc.).`;
+</step_3_vitals>`;
         if (trackOffscreen) {
-            step3 += `\nFor off-screen agents track vitals approximately, using the labels from the template in the OUTPUT FORMAT step. Always track off-screen agents’ vitals. If they're asleep, mark WHEN they fell asleep and wake them after 4–12 hours based on prior state; never let them sleep over 12 hours unless comatose. Their lives off-screen must go on: obligations, inner thoughts, places to be, desires, impulses to meet/call/go somewhere, have sex, etc., like real people. Use agent type for this: students rarely sleep before midnight, especially weekends; employed adults usually sleep before midnight for work, though some are irresponsible and lose sleep to online scrolling. Use the character sheet for realistic habits, capabilities and resourcefulness and make sure what they do matches real human behavior with the same traits; agents do only what is actually possible to do in real life (unless paranormal/magical setting). Be very meticulous about psychological and logistical realism even if it doesn't serve the plot - the plot convenience is the last thing you should care about. Consider agent type: students rarely sleep before midnight, especially weekends; employed adults usually sleep before midnight for work, though some irresponsibly lose sleep to online scrolling, etc. For impulse: ONLY write what's related to VITALS (e.g. if 'energy' is 'tired', then impulse='Find bed and fall asleep' or whatever fits their location, if every label is ok, write '-'). STRICTLY AVOID omniscience: off-screen agents have NO knowledge of what {{user}} is currently doing.${trackOnscreen ? ' When moving off-screen agent to on-screen, convert their simplified vital values into approximate numbers that correspond to the label, and vice versa.' : ''}`;
+            step3 = step3.replace('</step_3_vitals>', `<offscreen_agents>
+OFF-SCREEN AGENTS: the system also calculates their vitals and runs their routine (sleeping, eating, bathroom, showers) from their PROFILE schedule (STEP 3.7). You write only their location, a short activity and — rarely — events. Their activity MUST match the "SCHEDULE NOW" hint in the SYSTEM FACTS unless the story gives a concrete reason to deviate (illness, an emergency, plans made in the story).
+Their lives off-screen go on independently: obligations, work or school, hobbies, chores, family and friends, errands, places to be, their own desires and troubles — like real people. Most of an off-screen agent's day has NOTHING to do with {{user}}: do NOT make them think about, wait for, look for, talk about or contact {{user}} unless an open Promise, a plan made in the story or the character sheet gives them a concrete reason (the system overwrites such activity text when there is none). Off-screen agents have NO knowledge of what {{user}} is doing right now. Use the character sheet for realistic habits, capabilities and resourcefulness, and make sure what they do matches real human behavior with the same traits; agents do only what is actually possible in real life (unless paranormal/magical setting). Be very meticulous about psychological and logistical realism even if it doesn't serve the plot — plot convenience is the last thing you should care about.
+</offscreen_agents>
+</step_3_vitals>`);
         }
-        step3 += `\n\n🩹 CONDITION: Track injuries, intoxication, illness, pain, medication, temperature discomfort, substance use. Show only when there are active conditions.`;
-        step3 += `\n</step_3_vitals>`;
         parts.push(step3);
 
         // ── STEP 3.5 — setting-specific resource (SSR) ────────────────────
@@ -212,16 +194,19 @@ If such a resource exists for an agent, track it using this template instead of 
 </resource_template>
 
 <passive_drift>
-Pick the ONE type below that best fits the resource and use its FIXED rate. Multiply the per-5-min rate by the number of 5-minute blocks from your Step 1 estimate — never apply it as a flat per-turn amount, and never round a small per-5-min rate up to 0.1 or a whole number; keep two decimals. Do NOT invent other rates:
-  regen (mana, ki, stamina charge, spell slots, focus): +0.33% per 5 min (+4%/hr) normally; +0.83% per 5 min (+10%/hr) while resting, meditating or in a place that feeds it; +0.67% per 5 min (+8%/hr) asleep; +0.17% per 5 min (+2%/hr) during exertion or stress.
-  drain (a charge or reserve that burns away on its own — ambient charge, borrowed power, a fading pact): −0.21% per 5 min (−2.5%/hr).
-  accum (HIGH-critical: corruption, taint, curse, rage, heat): no passive change; it changes only through events, and drops −0.13% per 5 min (−1.5%/hr) only if the setting establishes a way for it to bleed off (purification, cooling, calming).
-  static (sanity, faith, karma and similar): no passive change; event-only. Sanity-like resources recover +0.13% per 5 min (+1.5%/hr) only while the agent is calm and safe.
+Pick the ONE type below that best fits the resource. The system applies its fixed passive rates — you do not calculate anything:
+  regen — mana, ki, stamina charge, spell slots, focus (recovers over time; faster while resting, meditating or in a place that feeds it)
+  drain — a charge or reserve that burns away on its own (ambient charge, borrowed power, a fading pact)
+  accum — HIGH-critical: corruption, taint, curse, rage, heat (no passive change; changes only through events)
+  static — sanity, faith, karma and similar (event-only; sanity-like resources slowly recover while the agent is calm and safe)
 </passive_drift>
 
 <expenditure>
-Anything that consumes the resource (or, for accum, raises it) costs the FIXED amount of the matching tier — pick the tier by the scale of the action, not by guessing a number:
-  trivial (minor use, brief display): 3% | moderate (combat spell or technique, healing a wound, short sustained effect): 10% | major (large spell, ritual, transformation): 25% | extreme (ultimate or mass effect, resurrection): 50%. An effect that is held over time: 2% per 5 min.
+Report what happened to the resource with tags in the last field of the SSR line (comma-separated, or - for nothing):
+  use:trivial (minor use, brief display) | use:moderate (combat spell or technique, healing a wound, short sustained effect) | use:major (large spell, ritual, transformation) | use:extreme (ultimate or mass effect, resurrection) — pick the tier by the scale of the action; for accum resources the same tags RAISE the value.
+  held:MINUTES — an effect that is held over time (e.g. held:30).
+  gain:N — percent replenished, estimated from the setting's replenish trigger (e.g. gain:25).
+The system applies the fixed amounts. After the first appearance, copy the value from the previous state — the system recalculates it.
 </expenditure>
 
 <boost>
@@ -229,13 +214,29 @@ If replenishing the resource grants the agent a temporary supernatural or physic
 </boost>
 
 <type_tag>
-Add the chosen drift type (regen / drain / accum / static) as an extra FINAL field at the end of the SSR line. After the first snapshot, copy the type from the previous tracker state unchanged — never re-pick it.
+Add the chosen drift type (regen / drain / accum / static) as the field before the events at the end of the SSR line. After the first snapshot, copy the type from the previous tracker state unchanged — never re-pick it.
 </type_tag>
 
 <overrides>
-Numbers and rules stated by the character card, agent description or world info ALWAYS override all of the fixed values above.
+The system uses fixed standard rates. If the character card, agent description or world info states different numbers or rules, note them where relevant and report events accordingly.
 </overrides>
 </step_3_5_ssr>`);
+        if (trackOffscreen) {
+            parts.push(`<step_3_7_profile>
+STEP 3.7 — AGENT PROFILE (SCHEDULE)
+
+Write ONE PROFILE line for every tracked agent that is not listed under KNOWN PROFILES in the SYSTEM FACTS (including agents appearing for the first time). The system uses it to run the agent's days off-screen: sleep, obligations, meals, bathroom, showers. Read the character card, world info and the story, and decide the schedule yourself — do NOT force a standard 9-to-5; real people and beings live very different lives.
+  archetype: student | employed | shift | leisure | nocturnal | caregiver | other
+  sleep window: HH:MM-HH:MM in 24h, 4 to 12 hours long. Nocturnal creatures, night-shift workers and similar sleep at their own hours; students rarely sleep before midnight, especially on weekends; employed adults usually sleep before midnight for work, though some irresponsibly lose sleep to scrolling.
+  term: term | break | - (for students and others tied to a school year: whether lessons are on right now; - for everyone else).
+  blocks: up to 6, separated by ";" — "days HH:MM-HH:MM label strictness [term]". Days use English abbreviations: Mon-Fri, Sat, Mon,Wed,Fri, daily. Strictness: fixed (cannot be skipped: job, classes, a shift, a ritual) or soft (flexible: hobbies, social plans, errands). Add "term" ONLY for blocks that stop during breaks. Students: lessons and study on school days. Wealthy or leisure agents: mostly soft blocks (tutors, family events, social obligations, hobbies) at irregular times. Creatures: their own cycle and needs (hunts, rituals, court duties). Use - if the agent has no regular obligations.
+  note: up to 12 words — what they do with free time. Their OWN life. Never build a schedule around {{user}} unless the character card says the agent is fixated on {{user}}.
+Examples:
+PROFILE: Lysa | student | 01:00-09:00 | term | Mon-Fri 10:00-15:00 university lectures fixed term; Tue,Thu 17:00-19:00 dance club soft term | gaming, group chats, avoids cooking
+PROFILE: Dorian | nocturnal | 07:00-15:00 | - | daily 22:00-02:00 hunting fixed | reads, tends his wine cellar
+Never rewrite an existing PROFILE unless the story establishes a lasting change (new job, term ends, turned, moved away).
+</step_3_7_profile>`);
+        }
     }
 
     // ── STEP 4 — relationships ──────────────────────────────────────────
@@ -264,7 +265,7 @@ Apply DIFFERENT rules based strictly on whether the agent is physically present 
   RELATIONSHIP TRACKING:`;
         }
         step4 += `
-  Main feeling (0–1000) shows what an agent thinks and feels toward {{user}} OVERALL. Develops SLOWLY. IT IS NOT VOLATILE! Max +/-20 pts/in-game day unless a major positive/negative event occurs. Track the amount by adding "limit for [DD, MM]: value/20; -value/-20" after the Main feeling value.
+  Main feeling (0–1000) shows what an agent thinks and feels toward {{user}} OVERALL. Develops SLOWLY. IT IS NOT VOLATILE! Max +/-20 pts/in-game day unless a major positive/negative event occurs. The system enforces the daily limit in code and trims larger jumps, so report your honest estimate and do NOT track a daily total yourself. For a major event write "!" right after the Main value (e.g. 612!) — see MAJOR EVENTS.
     VALENCE: the feeling NAME determines whether it is positive or negative — output "+" for positive feelings, "-" for negative. The scale is always 0–1000.
     At 1000 → transforms into a STRONGER positive version of the same valence (positive → deeper positive; negative softens toward neutrality or slight positive).
     At 0 → transforms into a WEAKER / more neutral / negative version moving toward the opposite valence (for example, positive → indifference → negative).
@@ -272,7 +273,7 @@ Apply DIFFERENT rules based strictly on whether the agent is physically present 
     Dissipate ONLY when the specific event or mood that caused them has clearly ended within the scene.
     At 100 → intensifies into a stronger successor of the same valence.
     At 0 → dissolves into a milder predecessor or fades entirely.
-    Negative ITM transformation reaching 100 → deduct 1–20 from Main. Positive ITM transformation reaching 100 → add 1–20 to Main even if bypassing the daily limit. 
+    Negative ITM transformation reaching 100 → deduct 1–20 from Main. Positive ITM transformation reaching 100 → add 1–20 to Main even if bypassing the daily limit (a major event — mark it with !). 
   Relationship stage: update only when warranted by scene events.
   "Known for" duration: mention the date of first meeting - retrieve it from character sheet/world info. Track months/years, update accordingly to the current date.`;
 
@@ -286,10 +287,37 @@ Apply DIFFERENT rules based strictly on whether the agent is physically present 
   - Do not apply decay. 
   - Do not apply dissipation. 
   - Do not apply transformation. 
-  The ONLY exception: if the current roleplay messages contain an explicit interaction directly involving the off-screen agent (a letter arrives, a phone call, someone delivers specific news about {{user}}, etc) —
-  apply only the single targeted change that event warrants, and nothing else.
+  The ONLY exceptions: (1) the current roleplay messages contain an explicit interaction directly involving the off-screen agent (a letter arrives, a phone call, someone delivers specific news about {{user}}, etc); (2) a "Promise" in PLAN has passed its appointed time without {{user}} honoring it, and the narration shows that time has passed — apply the COMMITMENTS & NO-SHOWS rule once.
+  Apply only the single targeted change that event warrants, and nothing else.
   Time passing alone is NEVER a reason to change an off-screen agent's relationship.`;
         }
+
+        step4 += `
+
+  COMMITMENTS & NO-SHOWS:
+  A commitment is any concrete promise or arrangement between {{user}} and an agent (a meeting, call, favor, deadline, "I'll be there").
+  - LOG: when one is made or accepted in the scene, add it to the PLAN lines as "Promise ([Agent]): [what, when]". Keep copying it forward every turn until it is resolved. Promises take priority over holidays if the PLAN list is long.
+  - HONORED: remove it from PLAN. A small positive (+1–5 within the daily limit) only if the agent clearly cared.
+  - CANCELLED WITH NOTICE and a believable reason: remove it; Main 0 to -8 within the daily limit, depending on how much it mattered to the agent and how they take disappointment.
+  - BROKEN WITHOUT NOTICE (no-show, ignored, forgotten): apply ONLY when the narration shows the appointed time passed or the agent reacts to the absence. Never assume it. Treat it as a major event that bypasses the daily limit: Main -15 to -40 scaled by importance and by the agent's personality. Add an In The Moment feeling in the agent's own words (e.g. let down, stood up, irritated) at 50–80. Remove the promise from PLAN.
+  - PATTERN: if the same agent has been let down 2+ times recently, the next one hits harder and the agent gives less benefit of the doubt. Reflect it in the stage label.
+  - REPAIR: a sincere apology or make-up gesture lowers the In The Moment feeling, but Main recovers at most +10/day and never fully cancels a pattern in one scene.
+  - Only the narration decides what happened. Never invent a missed promise.`;
+
+        step4 += `
+
+  VOLATILE / TOXIC DYNAMICS:
+  Apply when the agent's character sheet, history or behavior in the scene is manipulative, controlling, abusive, avoidant, jealous, or otherwise unstable. Do NOT smooth them toward warmth. Realism over comfort.
+  - VOLATILITY: the system gives agents the player marked as volatile a wider daily limit, so report in-character reversals (love-bombing then devaluation, silent treatment, rage then charm) honestly and mark a sharp one with !. Every swing must have a visible trigger in the narration.
+  - AMBIVALENCE: Main may be a mixed feeling (e.g. "Resentful Attachment"). Choose "+" if the net pull toward {{user}} is positive, "-" otherwise. Use the In The Moment slots to hold contradictory feelings at the same time (e.g. one for affection, one for fear or resentment) instead of averaging them into a neutral number.
+  - SELF-VIEW vs REALITY: feeling names stay in the agent's own words (a controlling agent may call it "Protectiveness"). The stage label is the honest, observer-level name for the dynamic (e.g. "Controlling — Intermittent Warmth Phase").
+  - NO CHEAP RESETS: one apology, gift or compliance does not undo a pattern. It may lower an In The Moment feeling or add relief, but Main recovers slowly. In a controlling dynamic, {{user}}'s compliance raises relief or satisfaction, not respect or trust.
+  - NO UNPROMPTED GROWTH: do not drift a toxic dynamic toward healthy because time passed or {{user}} was nice once. Change requires sustained, visible behavior change in the scene.`;
+
+        step4 += `
+
+  MAJOR EVENTS:
+  Write "!" right after the Main value ONLY when something truly significant just happened in the narration (betrayal, confession, violence, rescue, a broken promise per COMMITMENTS & NO-SHOWS, an In The Moment feeling reaching 100). The system then allows a larger jump (it decides how much) and honors such a mark only occasionally. Never use "!" for ordinary moments; an unmarked jump is simply trimmed to the daily limit.`;
 
         step4 += `
 
@@ -311,19 +339,22 @@ LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for 
     if (trackOnscreen) {
         outFmt += `
 
-[One ONSCREEN line per agent physically present in the scene. Never track user's vitals. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
-ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | [Δsat] | [Δnrg] | [Δcln] | [Δthr] | [Δbld] | [Δaro] | [Δstr] | [condition or -]
+[One ONSCREEN line per agent physically present in the scene. Never track user's vitals. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} The system calculates food, energy, hygiene, thirst and bladder — do not output them.]
+ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [activity] | [events] | [stress 0–100] | [arousal 0–200] | [condition or -]
 
-  Vital values: integers 0–100 (arousal 0–200).
-  Delta format: +N or -N (e.g. +0.4 or -1.8). First snapshot: —
-  Condition: concise text and its effect. Or - if there are none.`;
+  Activity: sleep | rest | normal | exert. Events: tags from STEP 3, or -.
+  Stress / arousal: integers, your judgment (see STEP 3).
+  Condition: concise text and its effect with the remaining duration, e.g. "Drunk (~2h left)". Copy it unchanged from the previous state while it lasts. Or - if there are none.
+  FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once, estimating the starting values from the story:
+ONSCREEN: [gender emoji] | [Name] | [attire] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | — | — | — | — | — | — | — | [condition or -]
+  (integers 0–100, arousal 0–200.)`;
     }
 
     if (trackRelationships) {
         outFmt += `
 
-[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago - the relationship IS NOT CONSIDERED ACTIVE AND MUST BE OMITTED)${trackOffscreen ? " — whether they're on-screen or off-screen" : ''}. Always output these accordingly to the rules in the RELATIONSHIP RULES step.]
-REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name + value change] | [itm1 0–100] | [e2] | [itm2 name + value change] | [itm2 0–100] | [e3] | [itm3 name + value change] | [itm3 0–100] | [e4] | [itm4 name + value change] | [itm4 0–100]
+[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago AND there is no open Promise and no strong unresolved feeling - the relationship IS NOT CONSIDERED ACTIVE AND MAY BE OMITTED)${trackOffscreen ? " — whether they're on-screen or off-screen" : ''}. Always output these accordingly to the rules in the RELATIONSHIP RULES step.]
+REL: [Name] | [main 0–1000, followed by ! only for a major event] | [main feeling name + value change] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name + value change] | [itm1 0–100] | [e2] | [itm2 name + value change] | [itm2 0–100] | [e3] | [itm3 name + value change] | [itm3 0–100] | [e4] | [itm4 name + value change] | [itm4 0–100]
   Fewer than 4 ITM feelings: fill remaining slots with: - | - | -
   Feeling names: as the agent would personally describe them.`;
     }
@@ -331,28 +362,38 @@ REL: [Name] | [main 0–1000] | [main feeling name + value change] | [+ or -] | 
     if (trackOffscreen) {
         outFmt += `
 
-[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.${trackOnscreen ? ' Move OFFSCREEN to ONSCREEN if agent participates in the current scene.' : ''} Convert vitals accordingly to STEP 3 guidelines.]
-OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | [impulse (vital-related only, e.g. 'visit bathroom')]
+[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.${trackOnscreen ? ' Move OFFSCREEN to ONSCREEN if agent participates in the current scene.' : ''} The system calculates their vitals and runs their routine from their PROFILE — do not output vitals.]
+OFFSCREEN: [gender emoji] | [Name] | [location] | [activity — short, matching SCHEDULE NOW] | [events or -]
+  Events: tags from STEP 3, or - (the system already handles ordinary routine: sleeping, meals, bathroom, showers).
+  FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once:
+OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | -
   Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm`;
     }
-i
+
     if (trackOnscreen || trackOffscreen) {
         outFmt += `
 
 [Only for agents established as non-human per the non-human adaptation rules in STEP 3 — one NATURE line per such agent, right before their SSR line. Omit entirely for humans.]
-NATURE: [Name] | [species/type] | [🍴 modifier] | [😴 modifier] | [rule note, one short line]
+NATURE: [Name] | [species/type] | [🍴 modifier] | [😴 modifier] | [rule note, one short line] | [feeder type: slow / flesh / emotion / none]
   Modifier: ONE emoji, - if that vital is unchanged, or hide if it does not apply. Copy the line unchanged from the previous tracker state.`;
     }
 
     outFmt += `
 
 [Only if an agent has a Setting-Specific Resource per STEP 3.5 — one SSR line per such agent. Omit entirely for agents without one.]
-SSR: [Name] | [emoji] | [resource label] | [value 0–100] | [low or high] | [Δvalue] | [state label] | [boost or -] | [drift type]
-  Value/delta follow the same formatting as the standard vitals. First snapshot delta: —`;
+SSR: [Name] | [emoji] | [resource label] | [value 0–100] | [low or high] | [-] | [state label] | [boost or -] | [drift type] | [events or -]
+  Value: your estimate on the first appearance; afterwards copy it from the previous state (the system recalculates it and fills in the change). Events: use:/held:/gain: tags from STEP 3.5, or -.`;
+
+    if (trackOffscreen) {
+        outFmt += `
+
+[Only for agents with no KNOWN PROFILE in the SYSTEM FACTS — see STEP 3.7.]
+PROFILE: [Name] | [archetype] | [sleep HH:MM-HH:MM] | [term / break / -] | [blocks or -] | [note]`;
+    }
 
     outFmt += `
 
-[Signifigant upcoming plans and/or official holidays in the country:]
+[Significant upcoming plans, official holidays in the country, and open promises between {{user}} and agents. Promises are written as "Promise ([Agent]): [what]" in the description. Copy open promises forward unchanged until resolved.]
 PLAN: [date] | [description]`;
 
     parts.push(outFmt);
@@ -362,8 +403,8 @@ PLAN: [date] | [description]`;
 LOC: {{user}} stands in the doorway of her dorm room. The courier waits in the hallway with a tablet. Kevin is splayed on her bed.`;
     if (trackOnscreen) {
         example += `
-ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | 68.09 | 82.23 | 91.1 | 32.23 | 44.5 | 2 | 18.2 | — | — | — | — | — | — | — | -
-ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | 97.29 | 35.03 | 33.5 | 93.13 | 23.4 | 67 | 10.1 | — | — | — | — | — | — | — | —`;
+ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | normal | - | 18 | 2 | -
+ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | rest | caffeine | 10 | 67 | -`;
     }
     if (trackRelationships) {
         example += `
@@ -372,15 +413,20 @@ REL: Caleb | 347 | Suppressed Longing (0) | + | 20 years (since birth) | Childho
     }
     if (trackOffscreen) {
         example += `
-OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | fine | rested | fresh | fine | fine | none | calm | Finish eating.`;
+OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | meal, drinks`;
     }
     if (trackOnscreen || trackOffscreen) {
         example += `
 [NATURE example — only output a line like this if the agent is actually established as non-human per STEP 3; omit otherwise:]
-NATURE: Caleb | Incubus | ✨ | - | Feeds on erotic tension and desire; human food gives ~0–5%; sleeps normally`;
+NATURE: Caleb | Incubus | ✨ | - | Feeds on erotic tension and desire; human food gives ~0–5%; sleeps normally | emotion`;
         example += `
 [SSR example — only output a line like this if the agent actually has a Setting-Specific Resource per STEP 3.5; omit otherwise:]
-SSR: Kevin | 🩸 | Vitae | 62 | low | +18 | Sated | Enhanced strength (~2h left) | drain`;
+SSR: Kevin | 🩸 | Vitae | 62 | low | - | Sated | Enhanced strength (~2h left) | drain | use:moderate`;
+    }
+    if (trackOffscreen) {
+        example += `
+[PROFILE example — only for agents with no KNOWN PROFILE:]
+PROFILE: Caleb | leisure | 02:00-10:00 | - | Mon-Fri 14:00-18:00 gallery management fixed; Sat 12:00-15:00 family lunch soft | sketching, late-night walks`;
     }
     example += `
 PLAN: 18 May | Caleb's gallery opening — {{user}} invited by Lysa`;
@@ -598,6 +644,787 @@ function applyNatureToMeta(nature) {
     });
 }
 
+// ─── RELATIONSHIP LIMITS (enforced in code, not by the tracker model) ──────────
+// The tracker model reports an honest Main value; this module trims it to the
+// daily limit, tracks per-agent daily counters across turns, and rewrites the
+// REL line. Counters live in snapshot.meta, so deleting/swiping a tracker
+// state rolls them back with it.
+
+const REL_DAILY_CAP        = 20;    // normal agents: +/- per in-game day
+const REL_DAILY_CAP_VOL    = 60;    // agents listed as volatile
+const REL_MAJOR_CAP        = 40;    // one marked "!" event, normal agents
+const REL_MAJOR_CAP_VOL    = 100;   // one marked "!" event, volatile agents
+const REL_MAJOR_COOLDOWN   = 5;     // honor a "!" at most once per this many updates per agent
+const REL_FALLBACK_MINUTES = 8;     // in-game minutes assumed per update if the story header is missing
+
+const relKey = (n) => String(n || '').toLowerCase().replace(/[^\p{L}\d]+/gu, ' ').trim();
+
+function isVolatileAgent(name, s) {
+    const list = String(s.volatileAgents || '').split(',').map(relKey).filter(Boolean);
+    const k = relKey(name);
+    return !!k && list.some(v => v === k || k.split(' ')[0] === v || v.split(' ')[0] === k);
+}
+
+function enforceRelationshipLimits(rawText, prevSnap, s, timing) {
+    const prevMeta = prevSnap?.meta || {};
+    const prevAgents = prevMeta.agents || {};
+
+    const { clock, turn } = timing;
+    const day = Math.floor(clock / 1440);
+
+    // previous Main values by agent
+    const prevMain = {};
+    for (const line of String(prevSnap?.raw || '').split('\n')) {
+        const t = line.trim();
+        if (!t.startsWith('REL:') && !t.startsWith('RELATIONSHIP:')) continue;
+        const f = t.slice(t.indexOf(':') + 1).split('|').map(x => x.trim());
+        if (f.length >= 2 && f[0]) prevMain[relKey(f[0])] = parseFloat(f[1]);
+    }
+
+    const agents = {};
+    const out = String(rawText).split('\n').map(line => {
+        const t = line.trim();
+        if (!t.startsWith('REL:') && !t.startsWith('RELATIONSHIP:')) return line;
+        const colon = t.indexOf(':');
+        const prefix = t.slice(0, colon + 1);
+        const f = t.slice(colon + 1).split('|').map(x => x.trim());
+        if (f.length < 6 || !f[0]) return line;
+
+        const key = relKey(f[0]);
+        const major = /!/.test(f[1]);
+        let nv = parseFloat(String(f[1]).replace(/limit for.*$/i, '').replace(/[^0-9.\-]/g, ''));
+        if (!isFinite(nv)) return line;                       // unreadable value: leave it for the parser as before
+        nv = Math.max(0, Math.min(1000, nv));
+
+        const pv = prevMain[key];
+        const old = prevAgents[key] || {};
+        const st = { day, up: old.day === day ? (old.up || 0) : 0, down: old.day === day ? (old.down || 0) : 0, majorTurn: old.majorTurn ?? -999 };
+
+        let applied = 0;
+        if (isFinite(pv)) {
+            const vol = isVolatileAgent(f[0], s);
+            const cap = vol ? REL_DAILY_CAP_VOL : REL_DAILY_CAP;
+            const delta = nv - pv;
+            if (major && turn - st.majorTurn >= REL_MAJOR_COOLDOWN && delta !== 0) {
+                const mc = vol ? REL_MAJOR_CAP_VOL : REL_MAJOR_CAP;
+                applied = Math.max(-mc, Math.min(mc, delta));
+                st.majorTurn = turn;
+            } else if (delta > 0) {
+                applied = Math.min(delta, Math.max(0, cap - st.up));
+                st.up += applied;
+            } else if (delta < 0) {
+                applied = -Math.min(-delta, Math.max(0, cap - st.down));
+                st.down += -applied;
+            }
+            applied = Math.round(applied);
+            if (applied !== Math.round(delta)) console.info(`[enaennTracker] ${f[0]}: model gave ${Math.round(pv)} → ${Math.round(nv)}, applied ${applied >= 0 ? '+' : ''}${applied}${major ? ' (major event, limited)' : ''}`);
+            nv = Math.max(0, Math.min(1000, pv + applied));
+        }
+        agents[key] = st;
+
+        f[1] = String(Math.round(nv));
+        // keep the "(change)" shown next to the feeling name equal to what was really applied
+        const shown = `(${applied > 0 ? '+' : ''}${applied})`;
+        f[2] = /\([+\-−]?\d+(?:\.\d+)?\)\s*$/.test(f[2]) ? f[2].replace(/\([+\-−]?\d+(?:\.\d+)?\)\s*$/, shown) : `${f[2]} ${shown}`.trim();
+        return `${prefix} ${f.join(' | ')}`;
+    }).join('\n');
+
+    return { text: out, agents };
+}
+
+// ─── SYSTEM CALCULATIONS (time, vitals, routines, schedules) ──────────────────
+// The tracker model reports WHAT HAPPENED (activity, events, judged stress and
+// arousal). Every number is calculated here, with the rates from the prompt.
+// Where the prompt gave a range the midpoint is used. Values the prompt did not
+// specify are marked ASSUMED.
+
+const MAX_ELAPSED_MIN = 14 * 1440;
+
+const MONTH_NUM = {
+    jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+    'янв': 1, 'фев': 2, 'мар': 3, 'апр': 4, 'май': 5, 'мая': 5, 'июн': 6, 'июл': 7, 'авг': 8, 'сен': 9, 'окт': 10, 'ноя': 11, 'дек': 12,
+};
+const DOW_IDX = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+function daysFromCivil(y, m, d) {
+    y -= m <= 2 ? 1 : 0;
+    const era = Math.floor(y / 400);
+    const yoe = y - era * 400;
+    const doy = Math.floor((153 * (m + (m > 2 ? -3 : 9)) + 2) / 5) + d - 1;
+    const doe = yoe * 365 + Math.floor(yoe / 4) - Math.floor(yoe / 100) + doy;
+    return era * 146097 + doe - 719468;
+}
+const dowOfDay = (days) => (((days + 4) % 7) + 7) % 7;
+const todOf = (t) => ((Math.round(t) % 1440) + 1440) % 1440;
+const hhmm = (t) => { const m = todOf(t); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+const fmtNum = (n) => String(Number((+n).toFixed(2)));
+const fmtSigned = (n) => { const x = Number((+n).toFixed(2)); return (x > 0 ? '+' : '') + x; };
+
+// Reads the main model's own header:  Date: 📅 Fri, 17 Dec 2024  /  Time: 🕰️ 14:00—14:30
+function parseSettingHeader(text) {
+    const t = String(text || '');
+    const dm = t.match(/Date:[\s*_]*(?:📅[\s*_\uFE0F]*)?(?:([A-Za-z]{3,})\.?,?\s+)?(\d{1,2})\s+([A-Za-zА-Яа-яЁё]{3,})\.?,?\s+(-?\d{1,5})/);
+    const tm = t.match(/Time:[\s*_]*(?:🕰[\uFE0F]?[\s*_]*)?(\d{1,2})[:.](\d{2})(?:\s*[—–−-]+\s*(\d{1,2})[:.](\d{2}))?/);
+    if (!dm || !tm) return null;
+    const mon = MONTH_NUM[dm[3].toLowerCase().slice(0, 3)];
+    if (!mon) return null;
+    const day = +dm[2];
+    if (day < 1 || day > 31) return null;
+    const sh = +tm[1], sm = +tm[2];
+    const eh = tm[3] != null ? +tm[3] : sh, em = tm[4] != null ? +tm[4] : sm;
+    if (sh > 23 || sm > 59 || eh > 23 || em > 59) return null;
+    const days = daysFromCivil(+dm[4], mon, day);
+    const start = days * 1440 + sh * 60 + sm;
+    let end = days * 1440 + eh * 60 + em;
+    if (end < start) end += 1440;          // segment crosses midnight
+    const wd = dm[1] ? DOW_IDX[dm[1].toLowerCase().slice(0, 3)] : undefined;
+    const dowShift = wd != null ? (((wd - dowOfDay(days)) % 7) + 7) % 7 : null;
+    return { start, end, dowShift };
+}
+
+function computeTiming(prevMeta, header) {
+    const prevClock = prevMeta?.clock ?? null;
+    const prevSrc = prevMeta?.clockSrc || null;
+    const shift = header?.dowShift ?? prevMeta?.dowShift ?? 0;
+    if (header) {
+        if (prevClock == null || prevSrc !== 'header') return { clock: header.end, elapsed: 0, src: 'header', dowShift: shift };
+        const clock = Math.max(prevClock, header.end);
+        return { clock, elapsed: Math.min(MAX_ELAPSED_MIN, clock - prevClock), src: 'header', dowShift: shift };
+    }
+    if (prevClock == null) return { clock: 0, elapsed: 0, src: prevSrc || 'fallback', dowShift: shift };
+    return { clock: prevClock + REL_FALLBACK_MINUTES, elapsed: REL_FALLBACK_MINUTES, src: prevSrc || 'fallback', dowShift: shift };
+}
+
+// ── vitals ──
+const V_KEYS = ['sat', 'energy', 'hyg', 'thirst', 'bladder', 'arousal', 'stress'];
+const V_MAX = { sat: 100, energy: 100, hyg: 100, thirst: 100, bladder: 100, arousal: 200, stress: 100 };
+const vclamp = (k, x) => Math.max(0, Math.min(V_MAX[k], x));
+const V_SEED = { sat: 70, energy: 70, hyg: 80, thirst: 30, bladder: 25, arousal: 0, stress: 30 };   // ASSUMED defaults
+const LABEL_SEED = {
+    sat: { hungry: 20, fine: 60, full: 90 }, energy: { exhausted: 10, tired: 30, fine: 60, rested: 90 },
+    hyg: { dirty: 15, fine: 60, fresh: 90 }, bladder: { urgent: 85, pressing: 65, fine: 25 },
+    thirst: { dehydrated: 85, thirsty: 65, fine: 25 }, arousal: { none: 0, low: 20, simmering: 60, high: 120 },
+    stress: { stressed: 85, tense: 60, calm: 20 },
+};
+
+// per 5 minutes (midpoints of the prompt's ranges)
+const VR = {
+    sat: { rest: -1.1, normal: -1.85, sleep: -0.65, exert: -1.85 },
+    feeder: { slow: -0.125, flesh: -0.21, emotion: -0.335 }, feederExert: 2.5,
+    energyNormal: -0.43, energyStressed: -0.575, energySleep: 12.5 / 12,
+    hyg: -0.1, hygExert: 3.5, thirst: 0.5, bladder: 0.5, thirstExert: 1.5 /* ASSUMED: same as caffeine */,
+    arousalDecay: -0.5, arousalRiseMax: 8, stressRestDecay: -0.4,
+};
+const FEED_GAIN = { slow: 37.5, flesh: 55, emotion: 25 };
+const FEED_DRAIN = 70;
+const EVENT_FX = {
+    meal: { sat: 70 }, snack: { sat: 13.5 }, sip: { thirst: -12.5 }, glass: { thirst: -50, bladder: 25 },
+    bottle: { thirst: -100, bladder: 50 }, drinks: { thirst: -37.5 },
+    shower: { hyg: 97.5 }, wash: { hyg: 7.5 }, clothes: { hyg: 4 },
+    pee: { bladder: -100 },                                   // ASSUMED: relief empties the bladder
+};
+const SUBSTANCES = {
+    caffeine:   { instant: { energy: 12.5 }, dur: 180, haltEnergy: [0, 90], thirst: 1.5, bladder: 1.5, later: { at: 90, energy: -20 } },
+    alcohol:    { instant: { stress: -15 }, dur: 240, thirst: 2, bladder: 2, energyMul: [90, 240, 1.5] },
+    nicotine:   { instant: { stress: -7.5 }, dur: 60, satMul: 0.5 },
+    cannabis:   { instant: { stress: -20 }, dur: 150, satMul: 2.5, thirst: 1.5, energyMul: [0, 150, 1.5] },   // dur, thirst ×1.5: ASSUMED
+    stimulant:  { instant: { energy: 40 }, dur: 240, haltEnergy: [0, 240], haltSat: true, arousalMul: 2, later: { at: 240, energy: -40, stress: 20 } },   // stress +20: ASSUMED
+    opioid:     { dur: 240, energyMul: [0, 240, 2.5], stressDown: true },                                        // dur: ASSUMED
+    psychedelic:{ dur: 420, haltEnergy: [0, 420], haltSat: true, later: { at: 420, energySet: 5 } },              // exhaustion level: ASSUMED
+};
+const EVENT_TAGS = new Set([...Object.keys(EVENT_FX), ...Object.keys(SUBSTANCES), 'feed', 'drain']);
+const ACTIVITIES = ['sleep', 'rest', 'normal', 'exert'];
+function normalizeActivity(w) {
+    const t = String(w || '').toLowerCase().trim();
+    if (!t) return null;
+    if (/^(sleep|asleep|nap|doz)/.test(t)) return 'sleep';
+    if (/^(rest|relax|idle|sit|lying|lie|still)/.test(t)) return 'rest';
+    if (/^(exert|exercis|work.?out|fight|run|train|sport|hard)/.test(t)) return 'exert';
+    if (/^(normal|active|walk|stand|work|mov)/.test(t)) return 'normal';
+    return null;
+}
+const EVENT_ALIASES = {
+    coffee: 'caffeine', tea: 'caffeine', espresso: 'caffeine', energydrink: 'caffeine',
+    beer: 'alcohol', wine: 'alcohol', vodka: 'alcohol', whiskey: 'alcohol', cocktail: 'alcohol', booze: 'alcohol',
+    cigarette: 'nicotine', smoke: 'nicotine', vape: 'nicotine', weed: 'cannabis', joint: 'cannabis',
+    breakfast: 'meal', lunch: 'meal', dinner: 'meal', supper: 'meal', toilet: 'pee', bathroom: 'pee', wc: 'pee',
+    water: 'glass', bath: 'shower',
+};
+
+function newVit(name, t) {
+    return { name, v: { ...V_SEED }, mods: [], nature: null, ssr: null, cond: {}, act: 'normal', t, offscreen: false };
+}
+
+function seedFromLabels(vit, labels) {
+    ['sat', 'energy', 'hyg', 'bladder', 'thirst', 'arousal', 'stress'].forEach((k, i) => {
+        const lab = String(labels[i] || '').trim().toLowerCase();
+        if (LABEL_SEED[k][lab] != null) vit.v[k] = LABEL_SEED[k][lab];
+    });
+}
+
+function vitalLabels(vit) {
+    const v = vit.v, n = vit.nature || {};
+    return [
+        n.hideSat ? 'fine' : v.sat >= 85 ? 'full' : v.sat < 30 ? 'hungry' : 'fine',
+        n.hideEnergy ? 'fine' : v.energy < 20 ? 'exhausted' : v.energy < 40 ? 'tired' : v.energy >= 85 ? 'rested' : 'fine',
+        v.hyg < 25 ? 'dirty' : v.hyg >= 90 ? 'fresh' : 'fine',
+        v.bladder >= 75 ? 'urgent' : v.bladder >= 55 ? 'pressing' : 'fine',
+        v.thirst >= 75 ? 'dehydrated' : v.thirst >= 55 ? 'thirsty' : 'fine',
+        v.arousal < 10 ? 'none' : v.arousal < 40 ? 'low' : v.arousal < 100 ? 'simmering' : 'high',
+        v.stress >= 75 ? 'stressed' : v.stress >= 50 ? 'tense' : 'calm',
+    ];
+}
+
+function parseEvents(str) {
+    const out = { tags: [], adj: [] };
+    const s = String(str || '').trim();
+    if (!s || s === '-' || s === '—') return out;
+    for (const raw of s.split(/[,;\s]+/)) {
+        const t = raw.toLowerCase().replace(/^[^\w+-]+|[^\w.+-]+$/g, '');
+        if (!t) continue;
+        const a = t.match(/^(food|sat|energy|hyg|thirst|bladder|arousal|stress)([+-]\d+(?:\.\d+)?)$/);
+        if (a) { out.adj.push({ k: a[1] === 'food' ? 'sat' : a[1], d: +a[2] }); continue; }
+        if (EVENT_TAGS.has(t)) out.tags.push(t);
+        else if (EVENT_ALIASES[t]) out.tags.push(EVENT_ALIASES[t]);
+    }
+    return out;
+}
+
+function startSubstance(vit, kind, now) {
+    const S_ = SUBSTANCES[kind];
+    vit.mods.push({ k: kind, t0: now, done: false });
+    if (vit.mods.length > 10) vit.mods.shift();
+    for (const [k, d] of Object.entries(S_.instant || {})) {
+        if ((k === 'energy' && vit.nature?.hideEnergy)) continue;
+        vit.v[k] = vclamp(k, vit.v[k] + d);
+    }
+}
+
+function applyEvents(vit, ev, now) {
+    const v = vit.v, nat = vit.nature || {};
+    const feeder = nat.feeder && nat.feeder !== 'none' ? nat.feeder : null;
+    const add = (k, d) => {
+        if (k === 'sat' && nat.hideSat) return;
+        if (k === 'energy' && nat.hideEnergy) return;
+        v[k] = vclamp(k, v[k] + d);
+    };
+    for (const tag of ev.tags) {
+        if (EVENT_FX[tag]) {
+            for (const [k, d] of Object.entries(EVENT_FX[tag])) {
+                if (k === 'sat' && feeder) add(k, tag === 'meal' ? 2.5 : 1);        // human food for a feeder: +0–5% at most
+                else add(k, d);
+            }
+        } else if (tag === 'feed' || tag === 'drain') {
+            if (feeder) add('sat', tag === 'drain' ? FEED_DRAIN : FEED_GAIN[feeder]);
+        } else if (SUBSTANCES[tag]) startSubstance(vit, tag, now);
+    }
+    for (const a of ev.adj) {
+        const lim = a.k === 'arousal' ? 60 : 30;                                       // ASSUMED safety clamp
+        add(a.k, Math.max(-lim, Math.min(lim, a.d)));
+    }
+}
+
+function multAt(vit, t) {
+    const r = { sat: 1, thirst: 1, bladder: 1, energy: 1, haltEnergy: false, haltSat: false, stressDown: false };
+    for (const m of vit.mods) {
+        const S_ = SUBSTANCES[m.k]; if (!S_) continue;
+        const rel = t - m.t0;
+        if (rel < 0 || rel >= S_.dur) continue;
+        if (S_.satMul) r.sat *= S_.satMul;
+        if (S_.thirst) r.thirst *= S_.thirst;
+        if (S_.bladder) r.bladder *= S_.bladder;
+        if (S_.energyMul && rel >= S_.energyMul[0] && rel < S_.energyMul[1]) r.energy *= S_.energyMul[2];
+        if (S_.haltEnergy && rel >= S_.haltEnergy[0] && rel < S_.haltEnergy[1]) r.haltEnergy = true;
+        if (S_.haltSat) r.haltSat = true;
+        if (S_.stressDown) r.stressDown = true;
+    }
+    return r;
+}
+
+function applyLaterEffects(vit, t) {
+    for (const m of vit.mods) {
+        const L = SUBSTANCES[m.k]?.later;
+        if (!L || m.done || t - m.t0 < L.at) continue;
+        m.done = true;
+        if (!vit.nature?.hideEnergy) {
+            if (L.energy != null) vit.v.energy = vclamp('energy', vit.v.energy + L.energy);
+            if (L.energySet != null) vit.v.energy = Math.min(vit.v.energy, L.energySet);
+        }
+        if (L.stress) vit.v.stress = vclamp('stress', vit.v.stress + L.stress);
+    }
+    vit.mods = vit.mods.filter(m => { const S_ = SUBSTANCES[m.k]; return S_ && (t - m.t0 < S_.dur || (S_.later && !m.done)); });
+}
+
+function arousalRiseMul(vit, t) {
+    return vit.mods.some(m => SUBSTANCES[m.k]?.arousalMul && t - m.t0 < SUBSTANCES[m.k].dur) ? 2 : 1;
+}
+
+function driftSsr(vit, act, blocks) {
+    const s = vit.ssr; let r = 0;
+    if (s.type === 'regen') r = act === 'sleep' ? 0.67 : (act === 'exert' || vit.v.stress >= 70) ? 0.17 : act === 'rest' ? 0.83 : 0.33;
+    else if (s.type === 'drain') r = -0.21;
+    else if (s.type === 'static') r = (vit.v.stress < 40 && act !== 'exert') ? 0.13 : 0;
+    s.val = Math.max(0, Math.min(100, s.val + r * blocks));      // accum: event-only
+}
+
+function advanceVitals(vit, from, to, actAt, routine) {
+    const nat = vit.nature || {}, v = vit.v;
+    let t = from;
+    while (t < to - 1e-9) {
+        const dt = Math.min(15, to - t), blocks = dt / 5;
+        const act = actAt(t + dt / 2);
+        const m = multAt(vit, t + dt / 2);
+        if (!nat.hideSat && !m.haltSat) {
+            let r = VR.sat[act] ?? VR.sat.normal;
+            if (nat.feeder && nat.feeder !== 'none') { r = VR.feeder[nat.feeder] ?? r; if (act === 'exert') r *= VR.feederExert; }
+            v.sat = vclamp('sat', v.sat + r * m.sat * blocks);
+        }
+        if (!nat.hideEnergy) {
+            if (act === 'sleep') v.energy = vclamp('energy', v.energy + VR.energySleep * blocks);
+            else if (!m.haltEnergy) {
+                const r = (v.stress >= 70 || act === 'exert') ? VR.energyStressed : VR.energyNormal;
+                v.energy = vclamp('energy', v.energy + r * m.energy * blocks);
+            }
+        }
+        v.hyg = vclamp('hyg', v.hyg + VR.hyg * (act === 'exert' ? VR.hygExert : 1) * blocks);
+        v.thirst = vclamp('thirst', v.thirst + VR.thirst * (act === 'exert' ? VR.thirstExert : 1) * m.thirst * blocks);
+        v.bladder = vclamp('bladder', v.bladder + VR.bladder * m.bladder * blocks);
+        v.arousal = vclamp('arousal', v.arousal + VR.arousalDecay * blocks);
+        if (m.stressDown && v.stress > 2) v.stress = Math.max(2, v.stress - 5 * blocks);
+        if (vit.offscreen && (act === 'sleep' || act === 'rest') && v.stress > 10) v.stress = Math.max(10, v.stress + VR.stressRestDecay * blocks);
+        if (vit.ssr) driftSsr(vit, act, blocks);
+        t += dt;
+        applyLaterEffects(vit, t);
+        if (routine) routine(vit, t, act);
+    }
+}
+
+// ── conditions: the model writes the duration once, the system counts it down ──
+const DUR_RE = /(\d+(?:\.\d+)?)\s*(min(?:ute)?s?|m|h(?:ou)?rs?|h|d(?:ay)?s?|w(?:eek)?s?)\b/i;
+function parseDurMin(str) {
+    const m = String(str).match(DUR_RE); if (!m) return null;
+    const n = +m[1], u = m[2].toLowerCase();
+    return u.startsWith('m') ? n : u.startsWith('h') ? n * 60 : u.startsWith('d') ? n * 1440 : n * 10080;
+}
+function fmtDur(min) {
+    if (min < 60) return `${Math.max(1, Math.round(min))}min`;
+    if (min < 2880) return `${Number((min / 60).toFixed(1))}h`;
+    return `${Math.round(min / 1440)} days`;
+}
+function countdownConditions(text, vit, elapsed) {
+    const raw = String(text || '').trim();
+    if (!raw || raw === '-' || raw === '—') { vit.cond = {}; return '-'; }
+    const parts = raw.split(/,\s*(?![^()]*\))/);
+    const next = {}, out = [];
+    for (const p of parts) {
+        const m = p.match(/^(.*?)\s*\((.*)\)\s*(.*)$/);
+        const dur = m ? parseDurMin(m[2]) : null;
+        if (!m || dur == null) { if (p.trim()) out.push(p.trim()); continue; }
+        const base = m[1].trim(), key = relKey(base);
+        const prev = vit.cond?.[key];
+        let rem = dur;
+        if (prev != null) { const counted = prev - elapsed; rem = dur > counted * 1.5 + 15 ? dur : Math.min(dur, counted); }
+        if (rem <= 0) continue;
+        next[key] = rem;
+        out.push(`${base} (~${fmtDur(rem)} left)`);
+    }
+    vit.cond = next;
+    return out.length ? out.join(', ') : '-';
+}
+
+// ── schedules ──
+let CUR_DOW_SHIFT = 0;   // story weekday minus calendar weekday (fictional calendars), set per update
+const DEFAULT_SLEEP = { start: 23 * 60 + 30, end: 7 * 60 + 30 };
+function parseHHMM(s) {
+    const m = String(s).match(/^(\d{1,2}):(\d{2})$/); if (!m) return null;
+    const h = +m[1], mi = +m[2]; return h > 23 || mi > 59 ? null : h * 60 + mi;
+}
+function parseSleepWindow(s) {
+    const m = String(s || '').match(/(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})/); if (!m) return null;
+    const a = parseHHMM(m[1]), b = parseHHMM(m[2]); if (a == null || b == null) return null;
+    const len = ((b - a) + 1440) % 1440;
+    return len < 240 || len > 720 ? null : { start: a, end: b };          // 4–12 h, per the prompt
+}
+function parseDays(str) {
+    const s = String(str || '').toLowerCase().trim();
+    if (/^(daily|every ?day|all|everyday)$/.test(s)) return [0, 1, 2, 3, 4, 5, 6];
+    if (/^weekdays?$/.test(s)) return [1, 2, 3, 4, 5];
+    if (/^weekends?$/.test(s)) return [0, 6];
+    const days = new Set();
+    for (const tok of s.split(/[,\s]+/).filter(Boolean)) {
+        const r = tok.split(/[-–—]/).map(x => DOW_IDX[x.slice(0, 3)]);
+        if (r.length === 2 && r[0] != null && r[1] != null) { for (let d = r[0], n = 0; n < 7; n++, d = (d + 1) % 7) { days.add(d); if (d === r[1]) break; } }
+        else if (r.length === 1 && r[0] != null) days.add(r[0]);
+        else return null;
+    }
+    return days.size ? [...days].sort() : null;
+}
+function parseBlocks(str) {
+    const blocks = [];
+    for (const part of String(str || '').split(';')) {
+        const m = part.trim().match(/^(.+?)\s+(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})\s+(.+)$/);
+        if (!m) continue;
+        const days = parseDays(m[1]), a = parseHHMM(m[2]), b = parseHHMM(m[3]);
+        if (!days || a == null || b == null || a === b) continue;
+        const rest = m[4];
+        const label = rest.replace(/\b(fixed|soft|term)\b/gi, '').replace(/\s+/g, ' ').trim() || 'busy';
+        blocks.push({ days, start: a, end: b, label: label.slice(0, 40), strict: /\bfixed\b/i.test(rest) ? 'fixed' : 'soft', term: /\bterm\b/i.test(rest) });
+        if (blocks.length >= 8) break;
+    }
+    return blocks;
+}
+function validateProfile(f, name, old) {
+    if (!f || !name) return null;
+    const sleep = parseSleepWindow(f[2]) || old?.sleep || DEFAULT_SLEEP;
+    const term = /^(term|break)$/i.test(f[3] || '') ? f[3].toLowerCase() : '-';
+    return { name, arch: String(f[1] || 'other').slice(0, 24), sleep, term, blocks: parseBlocks(f[4]), note: String(f[5] || '').replace(/\|/g, '/').slice(0, 120) };
+}
+const DEFAULT_PROFILE = { name: '', arch: 'default', sleep: DEFAULT_SLEEP, term: '-', blocks: [], note: '' };
+function profileLine(p) {
+    const days = (d) => d.length === 7 ? 'daily' : d.join(',') === '1,2,3,4,5' ? 'Mon-Fri' : d.map(x => DOW_NAMES[x]).join(',');
+    const blocks = (p.blocks || []).map(b => `${days(b.days)} ${hhmm(b.start)}-${hhmm(b.end)} ${b.label} ${b.strict}${b.term ? ' term' : ''}`).join('; ') || '-';
+    return `PROFILE: ${p.name} | ${p.arch} | ${hhmm(p.sleep.start)}-${hhmm(p.sleep.end)} | ${p.term} | ${blocks} | ${p.note || '-'}`;
+}
+function slotAt(prof, t) {
+    const tod = todOf(t), dow = (dowOfDay(Math.floor(t / 1440)) + CUR_DOW_SHIFT) % 7, sw = prof.sleep;
+    const inSleep = sw.start < sw.end ? (tod >= sw.start && tod < sw.end) : (tod >= sw.start || tod < sw.end);
+    if (inSleep) return { kind: 'sleep', label: 'asleep', end: sw.end };
+    for (const b of prof.blocks || []) {
+        if (b.term && prof.term === 'break') continue;
+        const hit = b.start < b.end
+            ? (b.days.includes(dow) && tod >= b.start && tod < b.end)
+            : ((b.days.includes(dow) && tod >= b.start) || (b.days.includes((dow + 6) % 7) && tod < b.end));
+        if (hit) return { kind: b.strict, label: b.label, end: b.end };
+    }
+    return { kind: 'free', label: null };
+}
+const actFromSlot = (slot) => slot.kind === 'sleep' ? 'sleep' : slot.kind === 'free' ? 'rest'
+    : /gym|workout|training|sport|exercis|hunt|run|dance|fight|labor/i.test(slot.label || '') ? 'exert' : 'normal';
+
+function nextObligation(prof, t, withinMin) {
+    const now = slotAt(prof, t);
+    for (let d = 15; d <= withinMin; d += 15) {
+        const s = slotAt(prof, t + d);
+        if (s.kind === 'fixed' && s.label !== now.label) return { label: s.label, at: t + d };
+    }
+    return null;
+}
+
+// ── off-screen routines (the part that makes people eat, sleep and pee) ──
+const hashStr = (s) => { let h = 0; for (const ch of String(s)) h = (h * 31 + ch.codePointAt(0)) | 0; return h >>> 0; };
+const jitter = (name, day, kind) => (hashStr(`${name}|${day}|${kind}`) % 13) - 6;     // ±6, stable per agent/day/need
+
+function makeRoutine(name, prof, skip) {
+    return (vit, t) => {
+        const v = vit.v, nat = vit.nature || {};
+        const slot = slotAt(prof, t), day = Math.floor(t / 1440), tod = todOf(t);
+        const asleep = slot.kind === 'sleep', fixed = slot.kind === 'fixed';
+        const J = (k) => jitter(name, day, k);
+        if (!skip.has('bladder') && v.bladder >= (asleep ? 92 : fixed ? 82 : 68) + J('b')) v.bladder = 3;
+        if (asleep) return;
+        if (!skip.has('thirst') && v.thirst >= (fixed ? 80 : 65) + J('t')) { v.thirst = Math.max(0, v.thirst - 50); v.bladder = Math.min(100, v.bladder + 25); }
+        const feeder = nat.feeder && nat.feeder !== 'none' ? nat.feeder : null;
+        if (!skip.has('sat') && !nat.hideSat) {
+            const rel = (tod - prof.sleep.end + 1440) % 1440;
+            const mealTime = rel < 150 || (rel >= 300 && rel < 450) || (rel >= 660 && rel < 840);
+            if (feeder) { if (v.sat <= 25 + J('f')) v.sat = Math.min(100, v.sat + FEED_GAIN[feeder]); }
+            else if (fixed) { if (v.sat <= 18 + J('f')) v.sat = Math.min(100, v.sat + 13.5); }
+            else if (v.sat <= (mealTime ? 50 : 30) + J('f')) { v.sat = Math.min(100, v.sat + 70); v.thirst = Math.max(0, v.thirst - 37.5); }
+        }
+        if (!fixed && !skip.has('hyg')) {
+            const rel = (tod - prof.sleep.end + 1440) % 1440;
+            if (v.hyg <= (rel < 120 ? 55 : 35) + J('h')) v.hyg = Math.min(100, v.hyg + 97.5);
+        }
+    };
+}
+const skipFromEvents = (ev) => {
+    const s = new Set();
+    for (const t of ev.tags) {
+        if (t === 'meal' || t === 'snack' || t === 'feed' || t === 'drain') s.add('sat');
+        if (t === 'pee') s.add('bladder');
+        if (['sip', 'glass', 'bottle', 'drinks'].includes(t)) s.add('thirst');
+        if (t === 'shower' || t === 'wash') s.add('hyg');
+    }
+    return s;
+};
+
+function impulseText(vit, prof, now) {
+    const v = vit.v, n = vit.nature || {}, out = [];
+    if (v.bladder >= 60) out.push('needs the bathroom');
+    if (v.thirst >= 60) out.push('thirsty');
+    if (!n.hideSat && v.sat <= 40) out.push('hungry');
+    if (!n.hideEnergy && v.energy < 30) out.push('exhausted');
+    if (v.hyg <= 40) out.push('wants a wash');
+    const nx = nextObligation(prof, now, 120);
+    if (nx) out.push(`due: ${nx.label} at ${hhmm(nx.at)}`);
+    return out.length ? out.join('; ') : '-';
+}
+
+// ── anti-orbit: off-screen agents don't think about {{user}} without a reason ──
+function mentionsUser(text, userNames) {
+    const names = (userNames || []).filter(Boolean).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const txt = String(text || '');
+    if (/\{\{user\}\}/i.test(txt)) return true;
+    return names.length > 0 && new RegExp(`(^|[^\\p{L}])(${names.join('|')})(?![\\p{L}])`, 'u').test(txt);
+}
+
+function seedFromRawLine(kind, f, name, t) {
+    const vit = newVit(name, t);
+    if (kind === 'on' && f.length >= 10) {
+        V_KEYS.forEach((k, i) => { const x = parseFloat(f[3 + i]); if (isFinite(x)) vit.v[k] = vclamp(k, x); });
+    } else if (kind === 'off' && f.length >= 11) seedFromLabels(vit, f.slice(4, 11));
+    return vit;
+}
+
+function safeModelView(prevSnap) {
+    try { return toModelView(prevSnap); } catch (e) { console.error('[enaennTracker] model view failed:', e); return prevSnap?.raw || ''; }
+}
+function safeSystemFacts(prevSnap) {
+    try { return buildSystemFacts(prevSnap, getNewestHeader()); } catch (e) { console.error('[enaennTracker] system facts failed:', e); return 'unavailable'; }
+}
+function getNewestHeader() {
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (!m || m.extra?.[TRACKER_FLAG] || m.is_user || m.is_system) continue;
+        return parseSettingHeader(m.mes);
+    }
+    return null;
+}
+function getUserNames() {
+    try { const n = getContext().name1; return n ? [n, String(n).split(/\s+/)[0]] : []; } catch { return []; }
+}
+
+// ── the whole pipeline ──
+function applySystemCalculations(rawText, prevSnap, s, ctx) {
+    const prevMeta = prevSnap?.meta || {};
+    const timing = computeTiming(prevMeta, ctx?.header || null);
+    const { clock, elapsed } = timing;
+    CUR_DOW_SHIFT = timing.dowShift || 0;
+    const prevClock = prevMeta.clock ?? clock;
+    const turn = (prevMeta.turn || 0) + 1;
+    const userNames = ctx?.userNames || [];
+    const fixated = String(s.fixatedAgents || '').split(',').map(relKey).filter(Boolean);
+    const isFixated = (name) => { const k = relKey(name); return fixated.some(v => v === k || k.split(' ')[0] === v || v.split(' ')[0] === k); };
+
+    const vitMap = JSON.parse(JSON.stringify(prevMeta.vit || {}));
+    const profMap = JSON.parse(JSON.stringify(prevMeta.prof || {}));
+    const lines = String(rawText).split('\n');
+    const split = (t) => t.slice(t.indexOf(':') + 1).split('|').map(x => x.trim());
+    const kindOf = (t) => ['ONSCREEN:', 'OFFSCREEN:', 'SSR:', 'NATURE:', 'PROFILE:', 'PLAN:', 'REL:', 'RELATIONSHIP:'].find(p => t.startsWith(p)) || null;
+
+    // migration: snapshots made before this system existed carry vitals only as text
+    if (!Object.keys(vitMap).length && prevSnap?.raw) {
+        for (const l of String(prevSnap.raw).split('\n')) {
+            const t = l.trim(), k = kindOf(t);
+            if (k !== 'ONSCREEN:' && k !== 'OFFSCREEN:') continue;
+            const f = split(t), nm = k === 'ONSCREEN:' ? f[1] : f[1];
+            if (!nm) continue;
+            if (k === 'ONSCREEN:' && f.length >= 18) vitMap[relKey(nm)] = seedFromRawLine('on', f, nm, prevClock);
+            if (k === 'OFFSCREEN:' && f.length >= 12) { const v = seedFromRawLine('off', f, nm, prevClock); v.offscreen = true; vitMap[relKey(nm)] = v; }
+        }
+    }
+
+    // first pass: NATURE, PROFILE, promises and strong feelings (anti-orbit triggers)
+    const triggers = new Set();
+    for (const l of lines) {
+        const t = l.trim(), k = kindOf(t);
+        if (k === 'NATURE:') {
+            const f = split(t); if (f.length < 4 || !f[0]) continue;
+            const key = relKey(f[0]);
+            const feederIn = String(f[5] || '').toLowerCase().trim();
+            const feeder = ['slow', 'flesh', 'emotion', 'none'].includes(feederIn) ? feederIn : (vitMap[key]?.nature?.feeder || (parseNatureMod(f[2]).emoji || parseNatureMod(f[2]).hide ? (parseNatureMod(f[2]).hide ? 'none' : 'slow') : 'none'));
+            if (!vitMap[key]) { vitMap[key] = newVit(f[0], clock); vitMap[key].pending = true; }
+            vitMap[key].nature = { hideSat: parseNatureMod(f[2]).hide, hideEnergy: parseNatureMod(f[3]).hide, feeder };
+        } else if (k === 'PROFILE:') {
+            const f = split(t); const p = validateProfile(f, f[0], profMap[relKey(f[0])]);
+            if (p) profMap[relKey(f[0])] = p;
+        } else if (k === 'PLAN:') {
+            const m = t.match(/Promise\s*\(([^)]+)\)/i); if (m) triggers.add(relKey(m[1]));
+        } else if (k === 'REL:' || k === 'RELATIONSHIP:') {
+            const f = split(t);
+            for (let i = 8; i < f.length; i += 3) if (parseFloat(f[i]) >= 70 && f[0]) triggers.add(relKey(f[0]));
+        }
+    }
+    const mayThink = (name) => {
+        const key = relKey(name);
+        if (isFixated(name) || triggers.has(key)) return true;
+        const p = profMap[key];
+        return !!(p && mentionsUser(p.note, userNames));
+    };
+
+    const out = lines.map(l => l);               // output lines, replaced in place
+    const seen = new Set();
+    const ssrBefore = {};
+    for (const [k, v] of Object.entries(vitMap)) if (v.ssr) ssrBefore[k] = v.ssr.val;
+
+    // catch-up for an agent we haven't simulated since before the previous update
+    const catchUp = (vit, key) => {
+        const from = vit.t ?? clock;
+        const upTo = Math.min(prevClock, clock);
+        if (from < upTo - 1) {
+            const prof = profMap[key] || DEFAULT_PROFILE;
+            vit.offscreen = true;
+            advanceVitals(vit, Math.max(from, upTo - MAX_ELAPSED_MIN), upTo, (t) => actFromSlot(slotAt(prof, t)), makeRoutine(vit.name, prof, new Set()));
+            vit.t = upTo;
+        }
+    };
+
+    for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim(), k = kindOf(t);
+        if (k !== 'ONSCREEN:' && k !== 'OFFSCREEN:') continue;
+        const f = split(t);
+        const on = k === 'ONSCREEN:';
+        const name = f[1];
+        if (!name || f.length < (on ? 8 : 5)) continue;
+        const key = relKey(name);
+        const legacy = on ? f.length >= 18 : f.length >= 12;
+        let vit = vitMap[key], fresh = false;
+        if (!vit || !vit.v || vit.pending) {
+            const nat = vit?.nature || null;
+            vit = seedFromRawLine(on ? 'on' : 'off', legacy ? f : [], name, clock);
+            vit.nature = nat; vitMap[key] = vit; fresh = true;
+        }
+        vit.name = name;
+        seen.add(key);
+        const before = { ...vit.v };
+        const prof = profMap[key] || DEFAULT_PROFILE;
+
+        if (!fresh) catchUp(vit, key);
+
+        if (on) {
+            vit.offscreen = false;
+            const actIn = String(legacy ? '' : f[3]).toLowerCase().trim();
+            const act = normalizeActivity(actIn) || vit.act || 'normal';
+            if (!fresh) advanceVitals(vit, vit.t ?? clock, clock, () => act, null);
+            const ev = legacy ? { tags: [], adj: [] } : parseEvents(f[4]);
+            applyEvents(vit, ev, clock);
+            const sIn = parseFloat(legacy ? f[9] : f[5]), aIn = parseFloat(legacy ? f[8] : f[6]);
+            const stepMax = Math.max(15, 6 * (elapsed / 5));                          // ASSUMED: stress can move ≤6 per 5 min (min 15)
+            if (isFinite(sIn)) vit.v.stress = vclamp('stress', Math.max(vit.v.stress - stepMax, Math.min(vit.v.stress + stepMax, sIn)));
+            if (isFinite(aIn)) {
+                if (Math.abs(aIn - before.arousal) < 1) { /* model repeated the old value = no stimulus: passive decay stands */ }
+                else if (aIn > vit.v.arousal) vit.v.arousal = vclamp('arousal', Math.min(aIn, vit.v.arousal + VR.arousalRiseMax * Math.max(1, elapsed / 5) * arousalRiseMul(vit, clock)));
+                else vit.v.arousal = vclamp('arousal', aIn);
+            }
+            const cond = countdownConditions(legacy ? (f.length >= 19 ? f[18] : f[17]) : f[7], vit, elapsed);
+            vit.act = act; vit.t = clock;
+            const nat = vit.nature || {};
+            const hid = { sat: nat.hideSat, energy: nat.hideEnergy };
+            const vals = V_KEYS.map(x => hid[x] ? '0' : fmtNum(vit.v[x]));
+            const deltas = V_KEYS.map(x => (fresh || hid[x]) ? '—' : fmtSigned(vit.v[x] - before[x]));
+            out[i] = `ONSCREEN: ${[f[0], f[1], f[2], ...vals, ...deltas, cond].join(' | ')}`;
+        } else {
+            vit.offscreen = true;
+            const ev = legacy ? { tags: [], adj: [] } : parseEvents(f[4]);
+            if (!fresh) advanceVitals(vit, vit.t ?? clock, clock, (tt) => actFromSlot(slotAt(prof, tt)), makeRoutine(name, prof, skipFromEvents(ev)));
+            applyEvents(vit, ev, clock);
+            vit.t = clock;
+            vit.act = actFromSlot(slotAt(prof, clock));
+            let activity = f[3] || '';
+            if (!mayThink(name) && mentionsUser(`${activity} ${f[2] || ''}`, userNames)) {
+                const slot = slotAt(prof, clock);
+                activity = slot.kind === 'sleep' ? 'Asleep' : slot.label ? slot.label.charAt(0).toUpperCase() + slot.label.slice(1) : (prof.note ? `Free time: ${prof.note}` : 'Going about their day');
+            }
+            out[i] = `OFFSCREEN: ${[f[0], f[1], f[2], activity, ...vitalLabels(vit), impulseText(vit, prof, clock)].join(' | ')}`;
+        }
+    }
+
+    // SSR lines (resource values come from the system after the first appearance)
+    for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim();
+        if (kindOf(t) !== 'SSR:') continue;
+        const f = split(t);
+        if (f.length < 6 || !f[0]) continue;
+        const key = relKey(f[0]);
+        let vit = vitMap[key];
+        if (!vit) { vit = newVit(f[0], clock); vit.offscreen = true; vit.pending = true; vitMap[key] = vit; }
+        const label = f[2] || 'Resource';
+        const dir = (f[4] || 'low').toLowerCase() === 'high' ? 'high' : 'low';
+        const typeIn = String(f[8] || '').toLowerCase().trim();
+        let fresh = false;
+        if (!vit.ssr || relKey(vit.ssr.label) !== relKey(label)) {
+            const v0 = parseFloat(String(f[3]).replace(/[^0-9.\-]/g, ''));
+            vit.ssr = { label, emoji: f[1] || '✨', val: Math.max(0, Math.min(100, isFinite(v0) ? v0 : 50)), dir, type: ['regen', 'drain', 'accum', 'static'].includes(typeIn) ? typeIn : 'static', state: f[6] || '', boost: f[7] || '-' };
+            fresh = true;
+        } else {
+            vit.ssr.dir = dir; vit.ssr.emoji = f[1] || vit.ssr.emoji; vit.ssr.state = f[6] || vit.ssr.state; vit.ssr.boost = f[7] || '-';
+            if (['regen', 'drain', 'accum', 'static'].includes(typeIn)) vit.ssr.type = typeIn;
+            const evs = String(f[9] || '');
+            const tiers = { trivial: 3, moderate: 10, major: 25, extreme: 50 };
+            let spent = 0, gain = 0;
+            for (const m of evs.matchAll(/use:(trivial|moderate|major|extreme)/gi)) spent += tiers[m[1].toLowerCase()];
+            for (const m of evs.matchAll(/held:(\d+(?:\.\d+)?)/gi)) spent += 2 * (+m[1] / 5);
+            for (const m of evs.matchAll(/gain:(\d+(?:\.\d+)?)/gi)) gain += Math.min(60, +m[1]);
+            const up = dir === 'high' ? spent - gain : gain - spent;               // HIGH-critical resources rise when used
+            vit.ssr.val = Math.max(0, Math.min(100, vit.ssr.val + up));
+        }
+        const delta = fresh || ssrBefore[key] == null ? '—' : fmtSigned(vit.ssr.val - ssrBefore[key]);
+        out[i] = `SSR: ${[f[0], vit.ssr.emoji, vit.ssr.label, fmtNum(vit.ssr.val), vit.ssr.dir, delta, vit.ssr.state, vit.ssr.boost || '-', vit.ssr.type].join(' | ')}`;
+    }
+
+    // NATURE lines: canonical 6 fields; PROFILE lines are re-emitted from the stored profiles
+    for (let i = 0; i < lines.length; i++) {
+        const t = lines[i].trim(), k = kindOf(t);
+        if (k === 'NATURE:') {
+            const f = split(t); const nat = vitMap[relKey(f[0])]?.nature;
+            if (f.length >= 4 && nat) out[i] = `NATURE: ${[f[0], f[1], f[2], f[3], f[4] || '-', nat.feeder].join(' | ')}`;
+        } else if (k === 'PROFILE:') out[i] = null;
+    }
+    let text = out.filter(l => l !== null).join('\n').replace(/\s+$/, '');
+    const profLines = Object.values(profMap).map(profileLine);
+    if (profLines.length) text += '\n' + profLines.join('\n');
+
+    // prune agents not seen for 60 in-game days
+    for (const [k, v] of Object.entries(vitMap)) if (!seen.has(k) && clock - (v.t ?? clock) > 60 * 1440) delete vitMap[k];
+
+    const rel = enforceRelationshipLimits(text, prevSnap, s, { clock, turn });
+    return { text: rel.text, meta: { clock, clockSrc: timing.src, dowShift: timing.dowShift || 0, turn, agents: rel.agents, vit: vitMap, prof: profMap }, elapsed };
+}
+
+// ── what the tracker model sees as "previous state" + system facts ──
+function toModelView(prevSnap) {
+    const vit = prevSnap?.meta?.vit || {};
+    const out = [];
+    for (const line of String(prevSnap?.raw || '').split('\n')) {
+        const t = line.trim();
+        if (t.startsWith('PROFILE:')) continue;
+        if (t.startsWith('ONSCREEN:')) {
+            const f = t.slice(9).split('|').map(x => x.trim());
+            if (f.length >= 18) { out.push(`ONSCREEN: ${[f[0], f[1], f[2], vit[relKey(f[1])]?.act || 'normal', '-', f[9], f[8], f[17]].join(' | ')}`); continue; }
+        } else if (t.startsWith('OFFSCREEN:')) {
+            const f = t.slice(10).split('|').map(x => x.trim());
+            if (f.length >= 12) { out.push(`OFFSCREEN: ${[f[0], f[1], f[2], f[3], '-'].join(' | ')}`); continue; }
+        }
+        out.push(line);
+    }
+    return out.join('\n');
+}
+
+function buildSystemFacts(prevSnap, header) {
+    const meta = prevSnap?.meta || {};
+    const { clock, elapsed, dowShift } = computeTiming(meta, header);
+    CUR_DOW_SHIFT = dowShift || 0;
+    const lines = [];
+    const dow = DOW_NAMES[(dowOfDay(Math.floor(clock / 1440)) + CUR_DOW_SHIFT) % 7];
+    lines.push(`IN-GAME TIME NOW: ${header || meta.clockSrc === 'header' ? `${dow} ${hhmm(clock)}` : 'unknown (no date/time header found in the story)'}; time since the previous update: ${elapsed >= 90 ? `${(elapsed / 60).toFixed(1)}h` : `${Math.round(elapsed)} min`}.`);
+    const vit = meta.vit || {}, prof = meta.prof || {};
+    const vlines = [], slines = [];
+    for (const v of Object.values(vit)) {
+        if (clock - (v.t ?? clock) > 3 * 1440) continue;
+        const n = v.nature || {};
+        vlines.push(`${v.name}: food ${n.hideSat ? 'n/a' : Math.round(v.v.sat)} | energy ${n.hideEnergy ? 'n/a' : Math.round(v.v.energy)} | hygiene ${Math.round(v.v.hyg)} | thirst ${Math.round(v.v.thirst)} | bladder ${Math.round(v.v.bladder)} | arousal ${Math.round(v.v.arousal)} | stress ${Math.round(v.v.stress)}${v.ssr ? ` | ${v.ssr.label} ${Math.round(v.ssr.val)}` : ''}`);
+        const p = prof[relKey(v.name)];
+        if (p && v.offscreen) { const sl = slotAt(p, clock); slines.push(`${v.name}: ${sl.kind === 'sleep' ? `asleep (until ${hhmm(p.sleep.end)})` : sl.label ? `${sl.label} (${sl.kind}, until ${hhmm(sl.end)})` : `free time${p.note ? ` — ${p.note}` : ''}`}`); }
+    }
+    if (vlines.length) lines.push('', 'SYSTEM VITALS (calculated by the system as of the previous update — read-only; do NOT output these numbers):', ...vlines);
+    if (slines.length) lines.push('', 'SCHEDULE NOW (what the system expects each off-screen agent to be doing; match it unless the story gives a concrete reason to deviate):', ...slines);
+    const known = Object.values(prof).map(p => p.name);
+    lines.push('', `KNOWN PROFILES: ${known.length ? known.join(', ') : 'none'}. Write a PROFILE line for every tracked agent not listed here.`);
+    return lines.join('\n');
+}
+
+
 // ─── DATA PARSER ──────────────────────────────────────────────────────────────
 
 function parseTrackerData(text) {
@@ -769,15 +1596,15 @@ function buildTrackerHTML(data, s) {
 // ─── FORMAT TRACKER FOR CONTEXT ───────────────────────────────────────────────
 
 // Strips the tracker's own internal bookkeeping annotation — e.g.
-// "648 limit for 18, May: 12/20" — that STEP 3 of the system prompt has the
+// "648 limit for 18, May: 12/20" (or /60 for volatile agents) — that STEP 3 of the system prompt has the
 // model append to the Main feeling value so the TRACKER can enforce the
-// +20/day relationship cap across turns. This annotation is meaningless to
+// +20/day (+60/day for volatile agents) relationship cap across turns. This annotation is meaningless to
 // the Main API (it's not roleplay content, just the tracker's own daily
 // counter) and must never reach it. It must, however, survive untouched in
 // the raw text that gets fed back into buildTrackerPrompt() as the previous
 // state, since that's the only way the tracker remembers the running count.
 function stripDailyLimitAnnotation(text) {
-    return text.replace(/\s*limit for[^|]*?:\s*-?\d+(?:\.\d+)?\s*\/\s*20/gi, '');
+    return text.replace(/\s*limit for[^|]*?:\s*-?\d+(?:\.\d+)?\s*\/\s*(?:20|60)/gi, '');
 }
 
 function formatTrackerForContext(raw) {
@@ -808,6 +1635,7 @@ function formatTrackerForContext(raw) {
             return 'ONSCREEN: ' + parts.join(' | ');
         }
         if (t.startsWith('REL:')) return 'RELATIONSHIP:' + t.slice('REL:'.length);
+        if (t.startsWith('NATURE:')) return 'NATURE: ' + t.slice('NATURE:'.length).split('|').slice(0, 5).map(x => x.trim()).join(' | ');   // feeder type is bookkeeping for the system
         if (t.startsWith('OFFSCREEN:')) {
             const parts = t.slice('OFFSCREEN:'.length).split('|').map(s => s.trim());
             if (parts.length < 12) return line;
@@ -919,10 +1747,10 @@ function updateBackupStatusUI() {
     el.textContent = ts ? `💾 Last saved locally: ${new Date(ts).toLocaleTimeString()}` : '';
 }
 
-function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData) {
+function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData, meta = null) {
     let snaps = getSnapshots(chatId);
     const windowSize = S().windowSize || 7;
-    snaps.push({ raw: rawText, labeled: labeledText, html: htmlContent, parsed: parsedData });
+    snaps.push({ raw: rawText, labeled: labeledText, html: htmlContent, parsed: parsedData, meta });
     if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
     setSnapshots(chatId, snaps);
     updateOverlayContent(chatId);
@@ -1138,6 +1966,31 @@ function toggleOverlay(show) {
     save({ overlayVisible });
 }
 
+function loadProfilesUI() {
+    const el = document.getElementById('enaennTracker_profiles');
+    if (!el) return;
+    const snap = getCurrentSnapshot(getChatId());
+    el.value = Object.values(snap?.meta?.prof || {}).map(profileLine).join('\n');
+}
+function applyProfilesUI() {
+    const el = document.getElementById('enaennTracker_profiles');
+    const chatId = getChatId();
+    const snaps = getSnapshots(chatId);
+    const snap = snaps[snaps.length - 1];
+    if (!el || !snap) { toastr?.warning?.('No tracker snapshot yet.'); return; }
+    const prof = {};
+    for (const l of el.value.split('\n')) {
+        const t = l.trim(); if (!t.startsWith('PROFILE:')) continue;
+        const f = t.slice(8).split('|').map(x => x.trim());
+        const p = validateProfile(f, f[0], snap.meta?.prof?.[relKey(f[0])]);
+        if (p) prof[relKey(f[0])] = p;
+    }
+    snap.meta = { ...(snap.meta || {}), prof };
+    setSnapshots(chatId, snaps);
+    loadProfilesUI();
+    toastr?.success?.('Profiles saved.');
+}
+
 function updateOverlayContent(chatId) {
     const overlay = document.getElementById('enaenn-overlay');
     if (!overlay) return;
@@ -1152,6 +2005,7 @@ function updateOverlayContent(chatId) {
     // on snapshots that were generated before the toggle changed.
     const html = snap.parsed ? buildTrackerHTML(snap.parsed, S()) : (snap.html || '<div style="padding:8px;opacity:0.5;">No data</div>');
     body.innerHTML = html;
+    try { loadProfilesUI(); } catch {}
 }
 
 // ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
@@ -1169,6 +2023,7 @@ function filterInjectionByCategory(text, s) {
         if (t.startsWith('ONSCREEN:')) return s.trackOnscreen !== false;
         if (t.startsWith('RELATIONSHIP:') || t.startsWith('REL:')) return s.trackRelationships !== false;
         if (t.startsWith('OFFSCREEN:')) return s.trackOffscreen !== false;
+        if (t.startsWith('PROFILE:')) return false;  // schedules are the tracker's own bookkeeping
         if (t.startsWith('SSR:') || t.startsWith('NATURE:')) return s.trackOnscreen !== false || s.trackOffscreen !== false;
         return true;
     }).join('\n');
@@ -1221,8 +2076,9 @@ function buildTrackerPrompt(chatId) {
     // 2. Previous tracker state
     const prevSnap  = getCurrentSnapshot(chatId);
     const prevState = prevSnap
-        ? `PREVIOUS TRACKER STATE (plain text — update from this):\n${prevSnap.raw}`
+        ? `PREVIOUS TRACKER STATE (plain text — update from this):\n${safeModelView(prevSnap)}`
         : 'No previous tracker state. Initialize fresh from chat context.';
+    const systemFacts = `SYSTEM FACTS (calculated by the system — trust them, do not recalculate):\n${safeSystemFacts(prevSnap)}`;
 
     // 3. Character description (bypasses token limit — always included if enabled)
     let charBlock = '';
@@ -1253,7 +2109,7 @@ function buildTrackerPrompt(chatId) {
         charBlock +
         wiBlock +
         `RECENT ROLEPLAY (${historyMessages.length} messages):\n${chatText}\n\n---\n\n` +
-        `${prevState}\n\n---\n\n` +
+        `${prevState}\n\n${systemFacts}\n\n---\n\n` +
         (newestBlock ? `${newestBlock}\n\n---\n\n` : '') +
         `Output the updated tracker data in the exact plain-text format specified. Nothing else.`;
 
@@ -1616,11 +2472,22 @@ async function updateTracker() {
         return;
     }
 
-    const parsed  = parseTrackerData(rawResult);
-    const labeled = formatTrackerForContext(rawResult);
+    // All numbers are calculated here, not by the tracker model: in-game time, vitals, off-screen routines,
+    // schedules, relationship limits.
+    let limited;
+    try {
+        limited = applySystemCalculations(rawResult, getCurrentSnapshot(chatId), S(), { header: getNewestHeader(), userNames: getUserNames() });
+    } catch (err) {
+        console.error('[enaennTracker] system calculations failed, saving the tracker output as written:', err);
+        limited = { text: rawResult, meta: getCurrentSnapshot(chatId)?.meta || null };
+    }
+    const finalRaw = limited.text;
+
+    const parsed  = parseTrackerData(finalRaw);
+    const labeled = formatTrackerForContext(finalRaw);
     const html    = buildTrackerHTML(parsed);
 
-    saveSnapshot(chatId, rawResult, labeled, html, parsed);
+    saveSnapshot(chatId, finalRaw, labeled, html, parsed, limited.meta);
 
     // Update stats display
     if (_pendingGenStats) {
@@ -1751,6 +2618,22 @@ const SETTINGS_HTML = `
           <span>🌍 Off-screen agents</span>
         </label>
       </div>
+      <div class="enaenn-gap" style="margin-top:6px;">
+        <div>🧲 Fixated agents</div>
+        <input type="text" id="enaennTracker_fixatedAgents" class="text_pole" placeholder="e.g. Lysa" style="width:100%;" />
+        <small style="opacity:0.6;">Comma-separated names. Only these off-screen agents may keep thinking about {{user}} without a reason (open promise, plan, strong feeling). Use it for characters whose card says they are obsessed.</small>
+      </div>
+      <div class="enaenn-gap" style="margin-top:6px;">
+        <div>⚡ Volatile agents</div>
+        <input type="text" id="enaennTracker_volatileAgents" class="text_pole" placeholder="e.g. Kevin, Lysa" style="width:100%;" />
+        <small style="opacity:0.6;">Comma-separated names. These agents may swing faster (±60/day instead of ±20). Limits are enforced by the extension, not the tracker model.</small>
+      </div>
+      <details class="enaenn-gap" style="margin-top:6px;">
+        <summary>🗓️ Agent profiles (schedules)</summary>
+        <textarea id="enaennTracker_profiles" class="text_pole" rows="7" style="width:100%;font-size:11px;" placeholder="PROFILE: Name | archetype | 23:30-07:30 | term | Mon-Fri 09:00-15:00 classes fixed term | note"></textarea>
+        <small style="opacity:0.6;">One line per agent: name | archetype | sleep window (4–12h) | term/break/- | blocks (days HH:MM-HH:MM label fixed/soft [term]; separated by ;) | note. Written by the tracker once per agent; edit here to correct it.</small>
+        <div style="margin-top:4px;"><button id="enaennTracker_profilesApply" class="menu_button">Apply</button> <button id="enaennTracker_profilesReload" class="menu_button">Reload</button></div>
+      </details>
 
       <hr />
 
@@ -1907,6 +2790,14 @@ function bindUI() {
         save({ trackRelationships: this.checked });
         updateOverlayContent(getChatId());
         refreshExtensionPrompt();
+    });
+    $('#enaennTracker_fixatedAgents').on('change', function () {
+        save({ fixatedAgents: String(this.value || '').trim() });
+    });
+    $('#enaennTracker_profilesReload').on('click', () => loadProfilesUI());
+    $('#enaennTracker_profilesApply').on('click', () => applyProfilesUI());
+    $('#enaennTracker_volatileAgents').on('change', function () {
+        save({ volatileAgents: String(this.value || '').trim() });
     });
     $('#enaennTracker_trackOffscreen').on('change', function () {
         save({ trackOffscreen: this.checked });
@@ -2068,6 +2959,9 @@ jQuery(async () => {
     $('#enaennTracker_trackOnscreen').prop('checked',      S().trackOnscreen);
     $('#enaennTracker_trackRelationships').prop('checked', S().trackRelationships);
     $('#enaennTracker_trackOffscreen').prop('checked',     S().trackOffscreen);
+    $('#enaennTracker_volatileAgents').val(S().volatileAgents || '');
+    $('#enaennTracker_fixatedAgents').val(S().fixatedAgents || '');
+    loadProfilesUI();
     $('#enaennTracker_useCharDesc').prop('checked',  S().useCharDescription);
     $('#enaennTracker_useWI').prop('checked',        S().useWorldInfo);
     $('#enaennTracker_wiTokenLimit').val(S().wiTokenLimit);
