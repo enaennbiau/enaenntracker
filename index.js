@@ -126,6 +126,7 @@ ACTIVITY (one word per on-screen agent): sleep | rest (awake, minimal movement) 
 EVENTS (what actually happened to the agent since the previous state, "-" if nothing). Comma-separated tags:
   meal, snack | sip, glass, bottle (water) | drinks (drank with a meal) | shower, wash (quick wash), clothes (changed into clean clothes) | pee (used the toilet)
   caffeine, alcohol, nicotine, cannabis, stimulant (cocaine, amphetamines), opioid (heavy sedatives), psychedelic (LSD, shrooms) | feed, drain (non-human feeding, see below)
+  slept:H — how many hours the agent actually SLEPT during the time since the previous update (e.g. slept:6, slept:0.5). REQUIRED whenever the agent slept in that period, even if they are awake now. The activity word describes the state NOW; slept:H describes the past.
   Anything else that changes a vital (sex, exertion beyond the activity, a shock, an injury...) → an adjustment tag: food, energy, hyg, thirst, bladder, arousal or stress followed by a signed number, e.g. hyg-15, bladder+10, arousal-40. Keep adjustments modest and justified by the narration.
   One tag per real event, reported once — never repeat an event that the previous state already accounts for.
 
@@ -342,7 +343,7 @@ LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for 
 [One ONSCREEN line per agent physically present in the scene. Never track user's vitals. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} The system calculates food, energy, hygiene, thirst and bladder — do not output them.]
 ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [activity] | [events] | [stress 0–100] | [arousal 0–200] | [condition or -]
 
-  Activity: sleep | rest | normal | exert. Events: tags from STEP 3, or -.
+  Activity: sleep | rest | normal | exert — the agent's state RIGHT NOW. Events: tags from STEP 3, or -. If the agent slept at any point since the previous update, ALWAYS include slept:H in Events (e.g. slept:6), even if they are awake now.
   Stress / arousal: integers, your judgment (see STEP 3).
   Condition: concise text and its effect with the remaining duration, e.g. "Drunk (~2h left)". Copy it unchanged from the previous state while it lasts. Or - if there are none.
   FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once, estimating the starting values from the story:
@@ -877,7 +878,7 @@ function vitalLabels(vit) {
 }
 
 function parseEvents(str) {
-    const out = { tags: [], adj: [] };
+    const out = { tags: [], adj: [], sleptMin: 0 };
     const s = String(str || '').trim();
     if (!s || s === '-' || s === '—') return out;
     for (const raw of s.split(/[,;\s]+/)) {
@@ -885,6 +886,8 @@ function parseEvents(str) {
         if (!t) continue;
         const a = t.match(/^(food|sat|energy|hyg|thirst|bladder|arousal|stress)([+-]\d+(?:\.\d+)?)$/);
         if (a) { out.adj.push({ k: a[1] === 'food' ? 'sat' : a[1], d: +a[2] }); continue; }
+        const sl = t.match(/^slept:(\d+(?:\.\d+)?)(h|hr|hrs|m|min)?$/);
+        if (sl) { out.sleptMin = Math.min(16 * 60, +sl[1] * (/^m/.test(sl[2] || '') ? 1 : 60)); continue; }
         if (EVENT_TAGS.has(t)) out.tags.push(t);
         else if (EVENT_ALIASES[t]) out.tags.push(EVENT_ALIASES[t]);
     }
@@ -1296,8 +1299,19 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
             vit.offscreen = false;
             const actIn = String(legacy ? '' : f[3]).toLowerCase().trim();
             const act = normalizeActivity(actIn) || vit.act || 'normal';
-            if (!fresh) advanceVitals(vit, vit.t ?? clock, clock, () => act, null);
-            const ev = legacy ? { tags: [], adj: [] } : parseEvents(f[4]);
+            const ev = legacy ? { tags: [], adj: [], sleptMin: 0 } : parseEvents(f[4]);
+            if (!fresh) {
+                // The reported activity describes the state NOW (e.g. "normal" right after waking up),
+                // so it must not be applied to the whole elapsed period: a 6h sleep would be charged as 6h of decay.
+                const t0 = vit.t ?? clock, span = clock - t0;
+                const wasAsleep = vit.act === 'sleep';
+                let sleepMin = ev.sleptMin || 0;
+                if (!sleepMin && wasAsleep && act !== 'sleep') sleepMin = Math.min(span, 10 * 60);   // was asleep at the last update, awake now: assume a normal night
+                sleepMin = Math.min(sleepMin, span);
+                const sleepFrom = wasAsleep ? t0 : clock - sleepMin;                                  // sleep right after the last update, or right before waking
+                const sleepTo = sleepFrom + sleepMin;
+                advanceVitals(vit, t0, clock, (tt) => (sleepMin > 0 && tt >= sleepFrom && tt < sleepTo) ? 'sleep' : act, null);
+            }
             applyEvents(vit, ev, clock);
             const sIn = parseFloat(legacy ? f[9] : f[5]), aIn = parseFloat(legacy ? f[8] : f[6]);
             const stepMax = Math.max(15, 6 * (elapsed / 5));                          // ASSUMED: stress can move ≤6 per 5 min (min 15)
