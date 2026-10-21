@@ -1211,7 +1211,9 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     const isFixated = (name) => { const k = relKey(name); return fixated.some(v => v === k || k.split(' ')[0] === v || v.split(' ')[0] === k); };
 
     const vitMap = JSON.parse(JSON.stringify(prevMeta.vit || {}));
-    const profMap = JSON.parse(JSON.stringify(prevMeta.prof || {}));
+    // schedules live in a per-chat store as well as in the snapshot, so a snapshot without meta (swipe, delete, old save) can't wipe them
+    const storedProf = JSON.parse(JSON.stringify((s.profileStore || {})[getChatId()] || {}));
+    const profMap = Object.assign(storedProf, JSON.parse(JSON.stringify(prevMeta.prof || {})));
     const lines = String(rawText).split('\n');
     const split = (t) => t.slice(t.indexOf(':') + 1).split('|').map(x => x.trim());
     const kindOf = (t) => ['ONSCREEN:', 'OFFSCREEN:', 'SSR:', 'NATURE:', 'PROFILE:', 'PLAN:', 'REL:', 'RELATIONSHIP:'].find(p => t.startsWith(p)) || null;
@@ -1240,7 +1242,9 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
             if (!vitMap[key]) { vitMap[key] = newVit(f[0], clock); vitMap[key].pending = true; }
             vitMap[key].nature = { hideSat: parseNatureMod(f[2]).hide, hideEnergy: parseNatureMod(f[3]).hide, feeder };
         } else if (k === 'PROFILE:') {
-            const f = split(t); const p = validateProfile(f, f[0], profMap[relKey(f[0])]);
+            const f = split(t);
+            if (!f[0] || profMap[relKey(f[0])]) continue;   // known agent: keep the stored schedule (the model can't see it, so its rewrite would be blind; edit profiles in the settings panel instead)
+            const p = validateProfile(f, f[0], null);
             if (p) profMap[relKey(f[0])] = p;
         } else if (k === 'PLAN:') {
             const m = t.match(/Promise\s*\(([^)]+)\)/i); if (m) triggers.add(relKey(m[1]));
@@ -1391,6 +1395,8 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
 
     // prune agents not seen for 60 in-game days
     for (const [k, v] of Object.entries(vitMap)) if (!seen.has(k) && clock - (v.t ?? clock) > 60 * 1440) delete vitMap[k];
+
+    try { (s.profileStore = s.profileStore || {})[getChatId()] = JSON.parse(JSON.stringify(profMap)); saveSettingsDebounced(); } catch (e) { console.warn('[enaennTracker] could not store profiles', e); }
 
     const rel = enforceRelationshipLimits(text, prevSnap, s, { clock, turn });
     return { text: rel.text, meta: { clock, clockSrc: timing.src, dowShift: timing.dowShift || 0, turn, agents: rel.agents, vit: vitMap, prof: profMap }, elapsed };
@@ -2000,7 +2006,9 @@ function applyProfilesUI() {
         if (p) prof[relKey(f[0])] = p;
     }
     snap.meta = { ...(snap.meta || {}), prof };
+    S().profileStore = { ...(S().profileStore || {}), [chatId]: JSON.parse(JSON.stringify(prof)) };
     setSnapshots(chatId, snaps);
+    save();
     loadProfilesUI();
     toastr?.success?.('Profiles saved.');
 }
