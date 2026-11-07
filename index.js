@@ -126,7 +126,7 @@ STEP 3 — VITALS (CALCULATED BY THE SYSTEM)
 
 The system calculates 🍴 food, 😴 energy, 🚿 hygiene, 💧 thirst and 🚽 bladder from the in-simulation time that passed, each agent's activity and the events you report. NEVER calculate or output those numbers (except once, for an agent's first appearance — see OUTPUT FORMAT). You report only what the record shows:
 
-ACTIVITY (one word per present agent): sleep | rest (awake, minimal movement) | normal | exert (heavy effort: sport, fighting, hard labor, strenuous or hot work).
+ACTIVITY (one word per present agent): sleep | rest (awake, minimal movement) | normal | exert (heavy effort: sport, fighting, hard labor, strenuous or hot work). Report sleep ONLY if the record shows the agent actually sleeping or dozing; never guess it from the time of day or because the scene is quiet.
 
 EVENTS (what actually happened to the agent since the previous state, "-" if nothing). Comma-separated tags:
   meal, snack | sip, glass, bottle (water) | drinks (drank with a meal) | shower, wash (quick wash), clothes (changed into clean clothes) | pee (used the toilet)
@@ -175,7 +175,7 @@ Also output one NATURE line per such agent, right before their SSR line (templat
 </step_3_vitals>`;
         if (trackOffscreen) {
             step3 = step3.replace('</step_3_vitals>', `<agents_elsewhere>
-AGENTS ELSEWHERE: the system also calculates their vitals and runs their routine (sleeping, eating, bathroom, showers) from their PROFILE schedule (STEP 3.7). You write only their location, a short activity and — rarely — events. Their activity MUST match the "SCHEDULE NOW" hint in the SYSTEM FACTS unless the record gives a concrete reason to deviate (illness, an emergency, plans made in the record).
+AGENTS ELSEWHERE: the system also calculates their vitals and runs their routine (sleeping, eating, bathroom, showers) from their PROFILE schedule (STEP 3.7). You write only their location, a short activity and — rarely — events. Their activity MUST match the "SCHEDULE NOW" hint in the SYSTEM FACTS unless the record gives a concrete reason to deviate (illness, an emergency, plans made in the record). SLEEP IS NEVER INFERRED: do not write sleeping, going or getting ready for bed, winding down, napping, drowsy or yawning unless SCHEDULE NOW says asleep or their energy in SYSTEM VITALS is below 25. The hour, the day of the week, darkness or "it is evening" are not reasons. Students, young adults and ordinary people go to bed late and stay up when their energy is fine.
 Their lives elsewhere go on independently: obligations, work or school, hobbies, chores, family and friends, errands, places to be, their own desires and troubles — like real people. Most of an absent agent's day has NOTHING to do with {{user}}: do NOT make them think about, wait for, look for, talk about or contact {{user}} unless an open Promise, a plan made in the record or the character sheet gives them a concrete reason (the system overwrites such activity text when there is none). Absent agents have NO knowledge of what {{user}} is doing right now. Use the character sheet for realistic habits, capabilities and resourcefulness, and make sure what they do matches real human behavior with the same traits; agents do only what is actually possible in real life (unless paranormal/magical setting). Be very meticulous about psychological and logistical realism even when it is inconvenient for {{user}}; the agent's own constraints decide.
 </agents_elsewhere>
 </step_3_vitals>`);
@@ -364,7 +364,7 @@ REL: [Name] | [main 0–1000, followed by ! only for a major event] | [main feel
         outFmt += `
 
 [One ELSEWHERE line per agent NOT present who has a relationship with the user or recurred in the recent records.${trackOnscreen ? ' Move ELSEWHERE to PRESENT if agent is present.' : ''} The system calculates their vitals and runs their routine from their PROFILE — do not output vitals.]
-ELSEWHERE: [gender emoji] | [Name] | [location] | [activity — short, matching SCHEDULE NOW] | [events or -]
+ELSEWHERE: [gender emoji] | [Name] | [location] | [activity — short; copy SCHEDULE NOW, no sleep/bed/drowsy wording unless it says asleep] | [events or -]
   Events: tags from STEP 3, or - (the system already handles ordinary routine: sleeping, meals, bathroom, showers).
   FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once:
 ELSEWHERE: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | -
@@ -1183,6 +1183,10 @@ function slotAt(prof, t) {
 const actFromSlot = (slot) => slot.kind === 'sleep' ? 'sleep' : slot.kind === 'free' ? 'rest'
     : /gym|workout|training|sport|exercis|hunt|run|dance|fight|labor/i.test(slot.label || '') ? 'exert' : 'normal';
 
+// Words that make an activity text claim sleep / bedtime / drowsiness (used by the sleep guard).
+const SLEEP_CLAIM = /\b(sleep\w*|asleep|slept|nap\w*|doz(?:e|es|ed|ing)|bedtime|(?:to|in|for) bed|wind(?:s|ing)? down|turn(?:s|ing)? in for|lights? out|sleepy|drowsy|yawn\w*|pajamas?|pyjamas?|call(?:s|ing)? it a night)\b/i;
+const SLEEP_TEXT_MIN_ENERGY = 25;   // below this an absent agent may genuinely be napping / collapsing outside the schedule
+
 function nextObligation(prof, t, withinMin) {
     const now = slotAt(prof, t);
     for (let d = 15; d <= withinMin; d += 15) {
@@ -1424,9 +1428,15 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
             vit.t = clock;
             vit.act = actFromSlot(slotAt(prof, clock));
             let activity = f[3] || '';
-            if (!mayThink(name) && mentionsUser(`${activity} ${f[2] || ''}`, userNames)) {
-                const slot = slotAt(prof, clock);
-                activity = slot.kind === 'sleep' ? 'Asleep' : slot.label ? slot.label.charAt(0).toUpperCase() + slot.label.slice(1) : (prof.note ? `Free time: ${prof.note}` : 'Going about their day');
+            const slotNow = slotAt(prof, clock);
+            const slotText = slotNow.kind === 'sleep' ? 'Asleep' : slotNow.label ? slotNow.label.charAt(0).toUpperCase() + slotNow.label.slice(1) : (prof.note ? `Free time: ${prof.note}` : 'Going about their day');
+            // Sleep guard: the schedule and energy decide sleep, never the tracker model's free text.
+            const claimsSleep = SLEEP_CLAIM.test(activity);
+            const rested = !(vit.nature && vit.nature.hideEnergy) && vit.v.energy >= SLEEP_TEXT_MIN_ENERGY;
+            if (slotNow.kind === 'sleep' ? !claimsSleep : (claimsSleep && rested)) {
+                activity = slotText;
+            } else if (!mayThink(name) && mentionsUser(`${activity} ${f[2] || ''}`, userNames)) {
+                activity = slotText;
             }
             out[i] = `ELSEWHERE: ${[f[0], f[1], f[2], activity, ...vitalLabels(vit), impulseText(vit, prof, clock)].join(' | ')}`;
         }
