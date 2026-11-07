@@ -32,6 +32,7 @@ const DEFAULT_SETTINGS = {
     overlayVisible:     true,
     overlayPosPct:      null,
     trackerStates:      {},
+    labelsMigrated:     0,             // stored-snapshot label migration version
 
     // ─── Character & World Info ───────────────────────────────────────────
     useCharDescription: true,          // inject character description into tracker prompt
@@ -42,14 +43,14 @@ const DEFAULT_SETTINGS = {
     // Turning one of these off stops the tracker AI from tracking/generating
     // that category at all (saves tokens), hides its tab in the overlay, and
     // excludes it from the text injected into the main chat API.
-    trackOnscreen:      true,          // ONSCREEN agents (present in the scene)
+    trackOnscreen:      true,          // PRESENT agents (present in the scene)
     trackRelationships: true,          // REL relationship tracking
-    trackOffscreen:     true,          // OFFSCREEN agents (not in the scene)
+    trackOffscreen:     true,          // ELSEWHERE agents (not in the scene)
     fixatedAgents:      '',            // comma-separated names exempt from the off-screen anti-orbit filter
     momentFadeHours:    3,             // base half-life (hours) of off-screen "in the moment" feelings; 0 = never fade
     mainDriftPerDay:    4,             // max slow drift (± points/day on the 0-1000 scale) of the Main feeling while away; 0 = off
     ignoredRel:         {},            // per chat: agents whose REL lines are dropped (removed by the player)
-    ignoredOff:         {},            // per chat: agents whose OFFSCREEN lines are dropped
+    ignoredOff:         {},            // per chat: agents whose ELSEWHERE lines are dropped
     volatileAgents:     '',            // comma-separated names: wider daily relationship limit (enforced in code)
 
     // ─── Local backup (survives Enabled being switched off) ───────────────
@@ -79,16 +80,16 @@ function buildTrackerSystemPrompt(s) {
     const parts = [];
 
     // ── Header ──────────────────────────────────────────────────────────
-    parts.push(`You are a meticulous silent background tracker for a collaborative simulation. Your job is to track ${trackAnyAgents ? 'the state of agents ({{char}}, side agents, and significant NPCs)' : 'simulation state such as location and pacing'}. Read the previous tracker state, the system facts and the recent narration, and update the tracker state block in plain-text format. The system calculates every number for you (time, vitals, daily limits) — your job is to report precisely and honestly what actually happened. Think carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.`);
+    parts.push(`You are a meticulous silent background tracker for a collaborative simulation. Your job is to track ${trackAnyAgents ? 'the state of agents ({{char}}, side agents, and other significant agents)' : 'simulation state such as location and pacing'}. Read the previous tracker state, the system facts and the recent messages, and update the tracker state block in plain-text format. The system calculates every number for you (time, vitals, daily limits) — your job is to report precisely and honestly what actually happened. Think carefully before the final output. Output ONLY the data lines — no preamble, no explanation, nothing else.`);
 
     // ── Strict output rules ─────────────────────────────────────────────
     let strict = `════════════════════════════════════
 STRICT OUTPUT RULES
 ════════════════════════════════════
-- Update the previous tracker state based on the current scene, the SYSTEM FACTS and the STEPS described lower. Never calculate or output numbers that the system calculates.
+- Update the previous tracker state based on the current situation, the SYSTEM FACTS and the STEPS described lower. Never calculate or output numbers that the system calculates.
 - Output only the plain-text data lines defined in the OUTPUT FORMAT step. No HTML. No markdown. No code fences. No commentary.`;
     if (trackAnyAgents) {
-        strict += `\n- Never include {{user}} in the vital tracking. Track ONLY agents ({{char}}, side characters, significant NPCs)`;
+        strict += `\n- Never include {{user}} in the vital tracking. Track ONLY agents ({{char}}, side characters, other significant agents)`;
     }
     strict += `\n- If no previous tracker state exists, initialize all values fresh from chat context.`;
     parts.push(strict);
@@ -97,25 +98,25 @@ STRICT OUTPUT RULES
     parts.push(`════════════════════════════════════
 STEP 1 — TIME (PROVIDED BY THE SYSTEM)
 ════════════════════════════════════
-The system reads the in-game date and time from the story's own header and tells you, in SYSTEM FACTS, what time it is now and how much time passed since the previous update. Do NOT estimate, calculate or output time. Use it for anything that depends on timing: what people are doing, conditions, plans, promises.`);
+The system reads the in-simulation date and time from the header in the messages and tells you, in SYSTEM FACTS, what time it is now and how much time passed since the previous update. Do NOT estimate, calculate or output time. Use it for anything that depends on timing: what people are doing, conditions, plans, promises.`);
 
     // ── STEP 2 — presence sorting ───────────────────────────────────────
     if (trackOnscreen && trackOffscreen) {
         parts.push(`════════════════════════════════════
 STEP 2 - SORT AGENTS BY THEIR PRESENCE
 ════════════════════════════════════
-Track which agents are present right now in the scene. 
-Move those who used to be ONSCREEN into OFFSCREEN section if they do not participate in the current scene (e.g., {{user}} is alone or hanging out with someone else), but are significant enough for the story. Move OFFSCREEN to ONSCREEN if they participate in current scene.`);
+Track which agents are physically present right now. 
+Move an agent from a PRESENT line to an ELSEWHERE line when they are no longer present (e.g., {{user}} is alone or hanging out with someone else), provided they have a relationship with {{user}} or recurred in the recent records. Move it back when they are present again.`);
     } else if (trackOnscreen) {
         parts.push(`════════════════════════════════════
 STEP 2 - TRACK PRESENT AGENTS
 ════════════════════════════════════
-Track which agents are physically present right now in the scene. Off-screen agents are not tracked in this configuration — only report agents who are currently in the scene.`);
+Track which agents are physically present right now. Agents elsewhere are not tracked in this configuration — only report agents who are currently present.`);
     } else if (trackOffscreen) {
         parts.push(`════════════════════════════════════
 STEP 2 - TRACK SIGNIFICANT AGENTS
 ════════════════════════════════════
-On-screen presence tracking is disabled in this configuration. Track significant agents relevant to the story (their location, activity, and state) regardless of whether they are in the current scene. Make sure they live their own life and do their own stuff. Strictly avoid forcing then to sleep past the 'rested' state.`);
+Presence tracking is disabled in this configuration. Track agents who have a relationship with {{user}} or recurred in the recent records (their location, activity, and state) regardless of whether they are present. Make sure they live their own life and do their own stuff. Strictly avoid forcing then to sleep past the 'rested' state.`);
     }
 
     // ── STEP 3 — vitals ─────────────────────────────────────────────────
@@ -123,15 +124,15 @@ On-screen presence tracking is disabled in this configuration. Track significant
         let step3 = `<step_3_vitals>
 STEP 3 — VITALS (CALCULATED BY THE SYSTEM)
 
-The system calculates 🍴 food, 😴 energy, 🚿 hygiene, 💧 thirst and 🚽 bladder from the in-game time that passed, each agent's activity and the events you report. NEVER calculate or output those numbers (except once, for an agent's first appearance — see OUTPUT FORMAT). You report only what the narration shows:
+The system calculates 🍴 food, 😴 energy, 🚿 hygiene, 💧 thirst and 🚽 bladder from the in-simulation time that passed, each agent's activity and the events you report. NEVER calculate or output those numbers (except once, for an agent's first appearance — see OUTPUT FORMAT). You report only what the record shows:
 
-ACTIVITY (one word per on-screen agent): sleep | rest (awake, minimal movement) | normal | exert (heavy effort: sport, fighting, hard labor, strenuous or hot work).
+ACTIVITY (one word per present agent): sleep | rest (awake, minimal movement) | normal | exert (heavy effort: sport, fighting, hard labor, strenuous or hot work).
 
 EVENTS (what actually happened to the agent since the previous state, "-" if nothing). Comma-separated tags:
   meal, snack | sip, glass, bottle (water) | drinks (drank with a meal) | shower, wash (quick wash), clothes (changed into clean clothes) | pee (used the toilet)
   caffeine, alcohol, nicotine, cannabis, stimulant (cocaine, amphetamines), opioid (heavy sedatives), psychedelic (LSD, shrooms) | feed, drain (non-human feeding, see below)
   slept:H — how many hours the agent actually SLEPT during the time since the previous update (e.g. slept:6, slept:0.5). REQUIRED whenever the agent slept in that period, even if they are awake now. The activity word describes the state NOW; slept:H describes the past.
-  Anything else that changes a vital (sex, exertion beyond the activity, a shock, an injury...) → an adjustment tag: food, energy, hyg, thirst, bladder, arousal or stress followed by a signed number, e.g. hyg-15, bladder+10, arousal-40. Keep adjustments modest and justified by the narration.
+  Anything else that changes a vital (sex, exertion beyond the activity, a shock, an injury...) → an adjustment tag: food, energy, hyg, thirst, bladder, arousal or stress followed by a signed number, e.g. hyg-15, bladder+10, arousal-40. Keep adjustments modest and justified by the record.
   One tag per real event, reported once — never repeat an event that the previous state already accounts for.
 
 🧠 STRESS (0–100) and 🔥 AROUSAL (0–200) are yours to judge; the system limits how fast they can move.
@@ -167,16 +168,16 @@ Also output one NATURE line per such agent, right before their SSR line (templat
   Rule note: what satisfies the need, what does not, and how the agent rests (e.g. "Feeds on blood only; human food restores ~0–5%; sleeps by day").
   The final field is the feeder type (slow / flesh / emotion / none).
   hide applies ONLY to creatures that truly have no such need: purely spiritual/infernal demons (hellborn fiends, bound or summoned demons, demon lords in true form), and undead/constructs that neither feed nor sleep (skeletons, wraiths, golems). Demons that DO feed — succubi/incubi, dream- or emotion-eaters, soul-eaters, gluttony/hunger demons — get a modifier, not hide.
-  Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the narrative establishes a change (turned, cursed, cured, transformed permanently).
+  Decide this ONCE, then copy the NATURE line unchanged from the previous tracker state. Re-evaluate only if the record establishes a change (turned, cursed, cured, transformed permanently).
   The system uses fixed standard rates; if the character card states exact rules, mention them in the rule note and report events accordingly.
 </nature_line_rules>
 </non_human_adaptation>
 </step_3_vitals>`;
         if (trackOffscreen) {
-            step3 = step3.replace('</step_3_vitals>', `<offscreen_agents>
-OFF-SCREEN AGENTS: the system also calculates their vitals and runs their routine (sleeping, eating, bathroom, showers) from their PROFILE schedule (STEP 3.7). You write only their location, a short activity and — rarely — events. Their activity MUST match the "SCHEDULE NOW" hint in the SYSTEM FACTS unless the story gives a concrete reason to deviate (illness, an emergency, plans made in the story).
-Their lives off-screen go on independently: obligations, work or school, hobbies, chores, family and friends, errands, places to be, their own desires and troubles — like real people. Most of an off-screen agent's day has NOTHING to do with {{user}}: do NOT make them think about, wait for, look for, talk about or contact {{user}} unless an open Promise, a plan made in the story or the character sheet gives them a concrete reason (the system overwrites such activity text when there is none). Off-screen agents have NO knowledge of what {{user}} is doing right now. Use the character sheet for realistic habits, capabilities and resourcefulness, and make sure what they do matches real human behavior with the same traits; agents do only what is actually possible in real life (unless paranormal/magical setting). Be very meticulous about psychological and logistical realism even if it doesn't serve the plot — plot convenience is the last thing you should care about.
-</offscreen_agents>
+            step3 = step3.replace('</step_3_vitals>', `<agents_elsewhere>
+AGENTS ELSEWHERE: the system also calculates their vitals and runs their routine (sleeping, eating, bathroom, showers) from their PROFILE schedule (STEP 3.7). You write only their location, a short activity and — rarely — events. Their activity MUST match the "SCHEDULE NOW" hint in the SYSTEM FACTS unless the record gives a concrete reason to deviate (illness, an emergency, plans made in the record).
+Their lives elsewhere go on independently: obligations, work or school, hobbies, chores, family and friends, errands, places to be, their own desires and troubles — like real people. Most of an absent agent's day has NOTHING to do with {{user}}: do NOT make them think about, wait for, look for, talk about or contact {{user}} unless an open Promise, a plan made in the record or the character sheet gives them a concrete reason (the system overwrites such activity text when there is none). Absent agents have NO knowledge of what {{user}} is doing right now. Use the character sheet for realistic habits, capabilities and resourcefulness, and make sure what they do matches real human behavior with the same traits; agents do only what is actually possible in real life (unless paranormal/magical setting). Be very meticulous about psychological and logistical realism even when it is inconvenient for {{user}}; the agent's own constraints decide.
+</agents_elsewhere>
 </step_3_vitals>`);
         }
         parts.push(step3);
@@ -186,7 +187,7 @@ Their lives off-screen go on independently: obligations, work or school, hobbies
 STEP 3.5 — SETTING-SPECIFIC RESOURCE (SSR), ONLY IF APPLICABLE
 
 <detection>
-Some settings define a resource for an agent that isn't one of the standard vitals above — e.g. mana, life force/vitae, stamina charge, corruption, sanity, ki, soul energy, and so on. Detect this ONLY from the character card, world info, or explicit narrative establishment — never invent one unprompted, and never apply it to an agent who is not established as having such a resource.
+Some settings define a resource for an agent that isn't one of the standard vitals above — e.g. mana, life force/vitae, stamina charge, corruption, sanity, ki, soul energy, and so on. Detect this ONLY from the character card, world info, or explicit establishment in the record — never invent one unprompted, and never apply it to an agent who is not established as having such a resource.
 If multiple agents have different resource types, track each independently — do not conflate them into one shared value.
 </detection>
 
@@ -230,7 +231,7 @@ The system uses fixed standard rates. If the character card, agent description o
             parts.push(`<step_3_7_profile>
 STEP 3.7 — AGENT PROFILE (SCHEDULE)
 
-Write ONE PROFILE line for every tracked agent that is not listed under KNOWN PROFILES in the SYSTEM FACTS (including agents appearing for the first time). The system uses it to run the agent's days off-screen: sleep, obligations, meals, bathroom, showers. Read the character card, world info and the story, and decide the schedule yourself — do NOT force a standard 9-to-5; real people and beings live very different lives.
+Write ONE PROFILE line for every tracked agent that is not listed under KNOWN PROFILES in the SYSTEM FACTS (including agents appearing for the first time). The system uses it to run the agent's days elsewhere: sleep, obligations, meals, bathroom, showers. Read the character card, world info and the messages, and decide the schedule yourself — do NOT force a standard 9-to-5; real people and beings live very different lives.
   archetype: student | employed | shift | leisure | nocturnal | caregiver | other
   sleep window: HH:MM-HH:MM in 24h, 4 to 12 hours long. Nocturnal creatures, night-shift workers and similar sleep at their own hours; students rarely sleep before midnight, especially on weekends; employed adults usually sleep before midnight for work, though some irresponsibly lose sleep to scrolling.
   term: term | break | - (for students and others tied to a school year: whether lessons are on right now; - for everyone else).
@@ -239,7 +240,7 @@ Write ONE PROFILE line for every tracked agent that is not listed under KNOWN PR
 Examples:
 PROFILE: Lysa | student | 01:00-09:00 | term | Mon-Fri 10:00-15:00 university lectures fixed term; Tue,Thu 17:00-19:00 dance club soft term | gaming, group chats, avoids cooking
 PROFILE: Dorian | nocturnal | 07:00-15:00 | - | daily 22:00-02:00 hunting fixed | reads, tends his wine cellar
-Never rewrite an existing PROFILE unless the story establishes a lasting change (new job, term ends, turned, moved away).
+Never rewrite an existing PROFILE unless the record establishes a lasting change (new job, term ends, turned, moved away).
 </step_3_7_profile>`);
         }
     }
@@ -255,40 +256,40 @@ STEP 4 — RELATIONSHIP RULES
   IF such system had been detected:
     - Use it as the authoritative source for the Main feeling value and relationship stage.
     - Map its scale to 0–1000 proportionally (e.g. if it uses 0–100 scale, like 'Apathy 76/100', multiply by 10 to make it 1000 like 'Apathy 760/1000').
-    - Display In The Moment feelings from scene context as usual unless system doesn't already do it. 
-    - Do NOT override the Main value with your own math — copy it faithfully from the latest scene message and multiply to match 1000-scale.
+    - Display In The Moment feelings from the current situation as usual unless system doesn't already do it. 
+    - Do NOT override the Main value with your own math — copy it faithfully from the latest message and multiply to match 1000-scale.
     - If the internal system names a feeling or relationship stage, use that name verbatim in your tracker.
   IF no such system is detected: apply the standard rules below as normal.
 
 ► STANDARD RULES: `;
         if (trackOffscreen) {
             step4 += `
-Apply DIFFERENT rules based strictly on whether the agent is physically present in the current scene.
-  ON-SCREEN AGENTS (physically in the current scene):`;
+Apply DIFFERENT rules based strictly on whether the agent is physically present.
+  PRESENT AGENTS (physically present):`;
         } else {
             step4 += `
   RELATIONSHIP TRACKING:`;
         }
         step4 += `
-  Main feeling (0–1000) shows what an agent thinks and feels toward {{user}} OVERALL. Develops SLOWLY. IT IS NOT VOLATILE! Max +/-20 pts/in-game day unless a major positive/negative event occurs. The system enforces the daily limit in code and trims larger jumps, so report your honest estimate and do NOT track a daily total yourself. For a major event write "!" right after the Main value (e.g. 612!) — see MAJOR EVENTS.
+  Main feeling (0–1000) shows what an agent thinks and feels toward {{user}} OVERALL. Develops SLOWLY. IT IS NOT VOLATILE! Max +/-20 pts/in-simulation day unless a major positive/negative event occurs. The system enforces the daily limit in code and trims larger jumps, so report your honest estimate and do NOT track a daily total yourself. For a major event write "!" right after the Main value (e.g. 612!) — see MAJOR EVENTS. A new agent starts from their circumstances: strangers and acquaintances sit near neutral, and the value moves only with interaction shown in the record.
     VALENCE: the feeling NAME determines whether it is positive or negative — output "+" for positive feelings, "-" for negative. The scale is always 0–1000.
     At 1000 → transforms into a STRONGER positive version of the same valence (positive → deeper positive; negative softens toward neutrality or slight positive).
     At 0 → transforms into a WEAKER / more neutral / negative version moving toward the opposite valence (for example, positive → indifference → negative).
-  In The Moment feelings (0–100, max 4 feelings per agent) reflect what is happening RIGHT NOW IN THIS CURRENT MOMENT.
-    Dissipate ONLY when the specific event or mood that caused them has clearly ended within the scene.
+  In The Moment feelings (0–100, max 4 per agent) are the agent's current reactions, each with a cause. A feeling keeps its emoji and name across updates while its cause is active, and moves by the cause's intensity (about ±3–15 per update with ongoing stimulus, scaled by the elapsed time in SYSTEM FACTS). Once the cause has ended, it fades on the same clock the system uses for agents elsewhere: ordinary emotions last 1–4 in-simulation hours, strong ones longer. Add a feeling only for a new cause; when all 4 slots are full, replace the lowest.
     At 100 → intensifies into a stronger successor of the same valence.
     At 0 → dissolves into a milder predecessor or fades entirely.
     Negative ITM transformation reaching 100 → deduct 1–20 from Main. Positive ITM transformation reaching 100 → add 1–20 to Main even if bypassing the daily limit (a major event — mark it with !). 
-  Relationship stage: update only when warranted by scene events.
+    A feeling held at 60 or above for more than an in-simulation hour also shifts Main by 1–3 in its direction, within the daily limit.
+  Relationship stage: the plain social role of {{user}} to the agent (stranger, regular customer, neighbor, coworker, classmate, friend, partner) plus their current standing in a few words. Update when the record changes either one.
   "Known for" duration: mention the date of first meeting - retrieve it from character sheet/world info. Track months/years, update accordingly to the current date.`;
 
         if (trackOffscreen) {
             step4 += `
 
-  OFF-SCREEN AGENTS (not physically in the current scene):
+  AGENTS ELSEWHERE (not physically present):
   COPY THE REL LINE EXACTLY (Main AND every In The Moment feeling, same values) as it was last time:
   - Do not change, decay, dissipate or transform anything yourself. The system does it: In The Moment feelings fade while the agent is away from {{user}} (mostly gone after a few hours; strong or ruminated ones last a day or more), and the Main feeling drifts slowly over days and weeks.
-  The ONLY exceptions: (1) the current roleplay messages contain an explicit interaction directly involving the off-screen agent (a letter arrives, a phone call, someone delivers specific news about {{user}}, etc); (2) a "Promise" in PLAN has passed its appointed time without {{user}} honoring it, and the narration shows that time has passed — apply the COMMITMENTS & NO-SHOWS rule once.
+  The ONLY exceptions: (1) the current messages contain an explicit interaction directly involving the absent agent (a letter arrives, a phone call, someone delivers specific news about {{user}}, etc); (2) a "Promise" in PLAN has passed its appointed time without {{user}} honoring it, and the record shows that time has passed — apply the COMMITMENTS & NO-SHOWS rule once.
   Apply only the single targeted change that event warrants, and nothing else.
   A new or changed In The Moment feeling counts as a fresh interaction and restarts the fading. Time passing alone is NOT a reason for you to change anything: the system handles it.`;
         }
@@ -297,32 +298,32 @@ Apply DIFFERENT rules based strictly on whether the agent is physically present 
 
   COMMITMENTS & NO-SHOWS:
   A commitment is any concrete promise or arrangement between {{user}} and an agent (a meeting, call, favor, deadline, "I'll be there").
-  - LOG: when one is made or accepted in the scene, add it to the PLAN lines as "Promise ([Agent]): [what, when]". Keep copying it forward every turn until it is resolved. Promises take priority over holidays if the PLAN list is long.
+  - LOG: when one is made or accepted in the interaction, add it to the PLAN lines as "Promise ([Agent]): [what, when]". Keep copying it forward every turn until it is resolved. Promises take priority over holidays if the PLAN list is long.
   - HONORED: remove it from PLAN. A small positive (+1–5 within the daily limit) only if the agent clearly cared.
   - CANCELLED WITH NOTICE and a believable reason: remove it; Main 0 to -8 within the daily limit, depending on how much it mattered to the agent and how they take disappointment.
-  - BROKEN WITHOUT NOTICE (no-show, ignored, forgotten): apply ONLY when the narration shows the appointed time passed or the agent reacts to the absence. Never assume it. Treat it as a major event that bypasses the daily limit: Main -15 to -40 scaled by importance and by the agent's personality. Add an In The Moment feeling in the agent's own words (e.g. let down, stood up, irritated) at 50–80. Remove the promise from PLAN.
+  - BROKEN WITHOUT NOTICE (no-show, ignored, forgotten): apply ONLY when the record shows the appointed time passed or the agent reacts to the absence. Never assume it. Treat it as a major event that bypasses the daily limit: Main -15 to -40 scaled by importance and by the agent's personality. Add an In The Moment feeling in the agent's own words (e.g. let down, stood up, irritated) at 50–80. Remove the promise from PLAN.
   - PATTERN: if the same agent has been let down 2+ times recently, the next one hits harder and the agent gives less benefit of the doubt. Reflect it in the stage label.
-  - REPAIR: a sincere apology or make-up gesture lowers the In The Moment feeling, but Main recovers at most +10/day and never fully cancels a pattern in one scene.
-  - Only the narration decides what happened. Never invent a missed promise.`;
+  - REPAIR: a sincere apology or make-up gesture lowers the In The Moment feeling, but Main recovers at most +10/day and never fully cancels a pattern in one interaction.
+  - Only the record decides what happened. Never invent a missed promise.`;
 
         step4 += `
 
   VOLATILE / TOXIC DYNAMICS:
-  Apply when the agent's character sheet, history or behavior in the scene is manipulative, controlling, abusive, avoidant, jealous, or otherwise unstable. Do NOT smooth them toward warmth. Realism over comfort.
-  - VOLATILITY: the system gives agents the player marked as volatile a wider daily limit, so report in-character reversals (love-bombing then devaluation, silent treatment, rage then charm) honestly and mark a sharp one with !. Every swing must have a visible trigger in the narration.
+  Apply when the agent's character sheet, history or behavior in the record is manipulative, controlling, abusive, avoidant, jealous, or otherwise unstable. Do NOT smooth them toward warmth. Realism over comfort.
+  - VOLATILITY: the system gives agents {{user}} marked as volatile a wider daily limit, so report reversals in the agent's behavior (love-bombing then devaluation, silent treatment, rage then charm) honestly and mark a sharp one with !. Every swing must have a visible trigger in the record.
   - AMBIVALENCE: Main may be a mixed feeling (e.g. "Resentful Attachment"). Choose "+" if the net pull toward {{user}} is positive, "-" otherwise. Use the In The Moment slots to hold contradictory feelings at the same time (e.g. one for affection, one for fear or resentment) instead of averaging them into a neutral number.
   - SELF-VIEW vs REALITY: feeling names stay in the agent's own words (a controlling agent may call it "Protectiveness"). The stage label is the honest, observer-level name for the dynamic (e.g. "Controlling — Intermittent Warmth Phase").
   - NO CHEAP RESETS: one apology, gift or compliance does not undo a pattern. It may lower an In The Moment feeling or add relief, but Main recovers slowly. In a controlling dynamic, {{user}}'s compliance raises relief or satisfaction, not respect or trust.
-  - NO UNPROMPTED GROWTH: do not drift a toxic dynamic toward healthy because time passed or {{user}} was nice once. Change requires sustained, visible behavior change in the scene.`;
+  - NO UNPROMPTED GROWTH: do not drift a toxic dynamic toward healthy because time passed or {{user}} was nice once. Change requires sustained, visible behavior change in the record.`;
 
         step4 += `
 
   MAJOR EVENTS:
-  Write "!" right after the Main value ONLY when something truly significant just happened in the narration (betrayal, confession, violence, rescue, a broken promise per COMMITMENTS & NO-SHOWS, an In The Moment feeling reaching 100). The system then allows a larger jump (it decides how much) and honors such a mark only occasionally. Never use "!" for ordinary moments; an unmarked jump is simply trimmed to the daily limit.`;
+  Write "!" right after the Main value ONLY when something truly significant just happened in the record (betrayal, confession, violence, rescue, a broken promise per COMMITMENTS & NO-SHOWS, an In The Moment feeling reaching 100). The system then allows a larger jump (it decides how much) and honors such a mark only occasionally. Never use "!" for ordinary moments; an unmarked jump is simply trimmed to the daily limit.`;
 
         step4 += `
 
-Choose ALL feeling names as the AGENT would personally describe them.
+Name each feeling in the agent's own words, derived from their circumstances: what {{user}} has actually done or not done, what else the agent has going on (work, money, family, fatigue), and what contact with {{user}} costs or gains them. Most feelings toward {{user}} are neutral to mild. Strong registers (longing, devotion, fear, fixation) need evidence in the record and a material reason, unless the character sheet establishes fixation.
 Track personality-consistent behavior: e.g. an avoidant agent in sustained proximity → 🧠 +10–15/day.`;
 
         parts.push(step4);
@@ -335,39 +336,38 @@ OUTPUT FORMAT (plain text only)
 
 Output ONLY the data lines below. No HTML. No markdown. No explanations. Fields separated by " | ".
 
-LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for each on-screen agent' : ' relevant to the scene'}]`;
+LOC: [1–2 sentence spatial positions${trackAnyAgents ? ' for {{user}} and for each present agent' : ' relevant to the situation'}]`;
 
     if (trackOnscreen) {
         outFmt += `
 
-[One ONSCREEN line per agent physically present in the scene. Never track user's vitals. Omit all ONSCREEN lines if user is alone.${trackOffscreen ? ' Move ONSCREEN to OFFSCREEN if agent is no longer in the scene.' : ''} The system calculates food, energy, hygiene, thirst and bladder — do not output them.]
-ONSCREEN: [gender emoji] | [Name] | [attire, concise] | [activity] | [events] | [stress 0–100] | [arousal 0–200] | [condition or -]
+[One PRESENT line per agent physically present. Never track user's vitals. Omit all PRESENT lines if user is alone.${trackOffscreen ? ' Move PRESENT to ELSEWHERE if agent is no longer present.' : ''} The system calculates food, energy, hygiene, thirst and bladder — do not output them.]
+PRESENT: [gender emoji] | [Name] | [attire, concise] | [activity] | [events] | [stress 0–100] | [arousal 0–200] | [condition or -]
 
   Activity: sleep | rest | normal | exert — the agent's state RIGHT NOW. Events: tags from STEP 3, or -. If the agent slept at any point since the previous update, ALWAYS include slept:H in Events (e.g. slept:6), even if they are awake now.
   Stress / arousal: integers, your judgment (see STEP 3).
   Condition: concise text and its effect with the remaining duration, e.g. "Drunk (~2h left)". Copy it unchanged from the previous state while it lasts. Or - if there are none.
-  FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once, estimating the starting values from the story:
-ONSCREEN: [gender emoji] | [Name] | [attire] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | — | — | — | — | — | — | — | [condition or -]
+  FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once, estimating the starting values from the record:
+PRESENT: [gender emoji] | [Name] | [attire] | [satiation] | [energy] | [cleanliness] | [thirst] | [bladder] | [arousal] | [stress] | — | — | — | — | — | — | — | [condition or -]
   (integers 0–100, arousal 0–200.)`;
     }
 
     if (trackRelationships) {
         outFmt += `
 
-[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago AND there is no open Promise and no strong unresolved feeling - the relationship IS NOT CONSIDERED ACTIVE AND MAY BE OMITTED)${trackOffscreen ? " — whether they're on-screen or off-screen" : ''}. Always output these accordingly to the rules in the RELATIONSHIP RULES step.]
+[One REL line per one tracked agent that has an active relationship with {{user}} (if they last communicated more than three weeks ago AND there is no open Promise and no strong unresolved feeling - the relationship IS NOT CONSIDERED ACTIVE AND MAY BE OMITTED)${trackOffscreen ? " — whether present or elsewhere" : ''}. Always output these accordingly to the rules in the RELATIONSHIP RULES step.]
 REL: [Name] | [main 0–1000, followed by ! only for a major event] | [main feeling name + value change] | [+ or -] | [known duration] | [stage] | [e1] | [itm1 name + value change] | [itm1 0–100] | [e2] | [itm2 name + value change] | [itm2 0–100] | [e3] | [itm3 name + value change] | [itm3 0–100] | [e4] | [itm4 name + value change] | [itm4 0–100]
-  Fewer than 4 ITM feelings: fill remaining slots with: - | - | -
-  Feeling names: as the agent would personally describe them.`;
+  Fewer than 4 ITM feelings: fill remaining slots with: - | - | -`;
     }
 
     if (trackOffscreen) {
         outFmt += `
 
-[One OFFSCREEN line per agent NOT in current scene who has a relationship with the user or is significant enough to the story.${trackOnscreen ? ' Move OFFSCREEN to ONSCREEN if agent participates in the current scene.' : ''} The system calculates their vitals and runs their routine from their PROFILE — do not output vitals.]
-OFFSCREEN: [gender emoji] | [Name] | [location] | [activity — short, matching SCHEDULE NOW] | [events or -]
+[One ELSEWHERE line per agent NOT present who has a relationship with the user or recurred in the recent records.${trackOnscreen ? ' Move ELSEWHERE to PRESENT if agent is present.' : ''} The system calculates their vitals and runs their routine from their PROFILE — do not output vitals.]
+ELSEWHERE: [gender emoji] | [Name] | [location] | [activity — short, matching SCHEDULE NOW] | [events or -]
   Events: tags from STEP 3, or - (the system already handles ordinary routine: sleeping, meals, bathroom, showers).
   FIRST APPEARANCE ONLY: if the agent is NOT listed under SYSTEM VITALS, output the full line instead, once:
-OFFSCREEN: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | -
+ELSEWHERE: [gender emoji] | [Name] | [location] | [activity] | [hunger] | [energy] | [clean] | [bladder] | [thirst] | [arousal] | [stress] | -
   Vitals: text labels only — no numbers: hungry/fine/full | exhausted/tired/fine/rested | dirty/fine/fresh | urgent/pressing/fine | dehydrated/thirsty/fine | none/low/simmering/high | stressed/tense/calm`;
     }
 
@@ -401,36 +401,37 @@ PLAN: [date] | [description]`;
 
     // ── EXAMPLE OUTPUT ──────────────────────────────────────────────────
     let example = `EXAMPLE OUTPUT:
-LOC: {{user}} stands in the doorway of her dorm room. The courier waits in the hallway with a tablet. Kevin is splayed on her bed.`;
+LOC: {{user}} stands at a laundromat folding table. Dana sits on a dryer by the window; Marcus loads a washer two machines down.`;
     if (trackOnscreen) {
         example += `
-ONSCREEN: ♂️ | Courier | Black uniform, Ambrose insignia, tablet and folio | normal | - | 18 | 2 | -
-ONSCREEN: ♂️ | Kevin | Black turtleneck, unzipped dark jeans | rest | caffeine | 10 | 67 | -`;
+PRESENT: ♀️ | Dana | Grey hoodie, work lanyard, sneakers | rest | caffeine | 24 | 0 | -
+PRESENT: ♂️ | Marcus | Hi-vis jacket, steel-toe boots | normal | - | 31 | 0 | -`;
     }
     if (trackRelationships) {
         example += `
-REL: Kevin | 648 | Confused Fascination (0) | + | 3 months (since 17th of September, 2024) | Enemies with Benefits — Sexually Charged Phase | 😑 | Amused Curiosity (+2) | 60 | 😐 | Reluctant Respect (-2) | 53  | 😤 | Frustrated Arousal (+3)| 38 | - | - | -
-REL: Caleb | 347 | Suppressed Longing (0) | + | 20 years (since birth) | Childhood Friends — Forbidden Love Phase | 🥺 | Need To Reach Out (+2) | 78 | - | - | -  | - | - | - | - | - | -`;
+REL: Dana | 540 | Easy Familiarity (0) | + | 8 months (since 3rd of March, 2026) | Neighbors — Occasional Small Talk | 🙂 | Mild Amusement (+2) | 42 | 😐 | Focused On Her Own Errand (0) | 55 | - | - | - | - | - | -
+REL: Marcus | 410 | Wary Tolerance (0) | - | 2 years (since 9th of August, 2024) | Neighbors — One Noise Complaint | 😒 | Irritation About The Noise (+3) | 45 | 😐 | Wants The Washer Free (0) | 30 | - | - | - | - | - | -`;
     }
     if (trackOffscreen) {
         example += `
-OFFSCREEN: ♂️ | Caleb | New York penthouse | Having late lunch with Lysa | meal, drinks`;
+ELSEWHERE: ♀️ | Priya | Corner shop on Elm Street | Restocking shelves before the afternoon rush | snack`;
     }
     if (trackOnscreen || trackOffscreen) {
         example += `
 [NATURE example — only output a line like this if the agent is actually established as non-human per STEP 3; omit otherwise:]
-NATURE: Caleb | Incubus | ✨ | - | Feeds on erotic tension and desire; human food gives ~0–5%; sleeps normally | emotion`;
+NATURE: Dorian | Vampire | 🩸 | - | Feeds on blood only; human food restores ~0–5%; sleeps by day | slow`;
         example += `
 [SSR example — only output a line like this if the agent actually has a Setting-Specific Resource per STEP 3.5; omit otherwise:]
-SSR: Kevin | 🩸 | Vitae | 62 | low | - | Sated | Enhanced strength (~2h left) | drain | use:moderate`;
+SSR: Mira | 🔷 | Focus | 62 | low | - | Steady | - | regen | use:moderate`;
     }
     if (trackOffscreen) {
         example += `
 [PROFILE example — only for agents with no KNOWN PROFILE:]
-PROFILE: Caleb | leisure | 02:00-10:00 | - | Mon-Fri 14:00-18:00 gallery management fixed; Sat 12:00-15:00 family lunch soft | sketching, late-night walks`;
+PROFILE: Priya | employed | 22:30-06:00 | - | Mon-Sat 07:00-15:00 corner shop shift fixed; Sun 11:00-13:00 family lunch soft | cooking for the week, video calls with her brother`;
     }
     example += `
-PLAN: 18 May | Caleb's gallery opening — {{user}} invited by Lysa`;
+PLAN: 9 November | Promise (Marcus): {{user}} returns his charging cable at the laundromat, 18:00
+PLAN: 14 November | Priya's brother visits for the weekend`;
 
     parts.push(example);
 
@@ -1295,21 +1296,21 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     const lines = String(rawText).split('\n').filter(l => {          // agents the player removed in edit mode stay removed
         const t = l.trim();
         if (/^(REL|RELATIONSHIP):/.test(t)) return !ignRel.has(relKey(t.slice(t.indexOf(':') + 1).split('|')[0]));
-        if (t.startsWith('OFFSCREEN:')) return !ignOff.has(relKey(t.slice(t.indexOf(':') + 1).split('|')[1]));
+        if (t.startsWith('ELSEWHERE:')) return !ignOff.has(relKey(t.slice(t.indexOf(':') + 1).split('|')[1]));
         return true;
     });
     const split = (t) => t.slice(t.indexOf(':') + 1).split('|').map(x => x.trim());
-    const kindOf = (t) => ['ONSCREEN:', 'OFFSCREEN:', 'SSR:', 'NATURE:', 'PROFILE:', 'PLAN:', 'REL:', 'RELATIONSHIP:'].find(p => t.startsWith(p)) || null;
+    const kindOf = (t) => ['PRESENT:', 'ELSEWHERE:', 'SSR:', 'NATURE:', 'PROFILE:', 'PLAN:', 'REL:', 'RELATIONSHIP:'].find(p => t.startsWith(p)) || null;
 
     // migration: snapshots made before this system existed carry vitals only as text
     if (!Object.keys(vitMap).length && prevSnap?.raw) {
         for (const l of String(prevSnap.raw).split('\n')) {
             const t = l.trim(), k = kindOf(t);
-            if (k !== 'ONSCREEN:' && k !== 'OFFSCREEN:') continue;
-            const f = split(t), nm = k === 'ONSCREEN:' ? f[1] : f[1];
+            if (k !== 'PRESENT:' && k !== 'ELSEWHERE:') continue;
+            const f = split(t), nm = k === 'PRESENT:' ? f[1] : f[1];
             if (!nm) continue;
-            if (k === 'ONSCREEN:' && f.length >= 18) vitMap[relKey(nm)] = seedFromRawLine('on', f, nm, prevClock);
-            if (k === 'OFFSCREEN:' && f.length >= 12) { const v = seedFromRawLine('off', f, nm, prevClock); v.offscreen = true; vitMap[relKey(nm)] = v; }
+            if (k === 'PRESENT:' && f.length >= 18) vitMap[relKey(nm)] = seedFromRawLine('on', f, nm, prevClock);
+            if (k === 'ELSEWHERE:' && f.length >= 12) { const v = seedFromRawLine('off', f, nm, prevClock); v.offscreen = true; vitMap[relKey(nm)] = v; }
         }
     }
 
@@ -1362,9 +1363,9 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
 
     for (let i = 0; i < lines.length; i++) {
         const t = lines[i].trim(), k = kindOf(t);
-        if (k !== 'ONSCREEN:' && k !== 'OFFSCREEN:') continue;
+        if (k !== 'PRESENT:' && k !== 'ELSEWHERE:') continue;
         const f = split(t);
-        const on = k === 'ONSCREEN:';
+        const on = k === 'PRESENT:';
         const name = f[1];
         if (!name || f.length < (on ? 8 : 5)) continue;
         const key = relKey(name);
@@ -1414,7 +1415,7 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
             const hid = { sat: nat.hideSat, energy: nat.hideEnergy };
             const vals = V_KEYS.map(x => hid[x] ? '0' : fmtNum(vit.v[x]));
             const deltas = V_KEYS.map(x => (fresh || hid[x]) ? '—' : fmtSigned(vit.v[x] - before[x]));
-            out[i] = `ONSCREEN: ${[f[0], f[1], f[2], ...vals, ...deltas, cond].join(' | ')}`;
+            out[i] = `PRESENT: ${[f[0], f[1], f[2], ...vals, ...deltas, cond].join(' | ')}`;
         } else {
             vit.offscreen = true;
             const ev = legacy ? { tags: [], adj: [] } : parseEvents(f[4]);
@@ -1427,7 +1428,7 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
                 const slot = slotAt(prof, clock);
                 activity = slot.kind === 'sleep' ? 'Asleep' : slot.label ? slot.label.charAt(0).toUpperCase() + slot.label.slice(1) : (prof.note ? `Free time: ${prof.note}` : 'Going about their day');
             }
-            out[i] = `OFFSCREEN: ${[f[0], f[1], f[2], activity, ...vitalLabels(vit), impulseText(vit, prof, clock)].join(' | ')}`;
+            out[i] = `ELSEWHERE: ${[f[0], f[1], f[2], activity, ...vitalLabels(vit), impulseText(vit, prof, clock)].join(' | ')}`;
         }
     }
 
@@ -1482,10 +1483,32 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     try { (s.profileStore = s.profileStore || {})[getChatId()] = JSON.parse(JSON.stringify(profMap)); saveSettingsDebounced(); } catch (e) { console.warn('[enaennTracker] could not store profiles', e); }
 
     const rel = enforceRelationshipLimits(text, prevSnap, s, { clock, turn });
-    const onKeys = new Set(lines.map(l => l.trim()).filter(t => t.startsWith('ONSCREEN:')).map(t => relKey(split(t)[1])));
+    const onKeys = new Set(lines.map(l => l.trim()).filter(t => t.startsWith('PRESENT:')).map(t => relKey(split(t)[1])));
     const momMap = JSON.parse(JSON.stringify(prevMeta.mom || {}));
     try { rel.text = applyMomentFade(rel.text, prevSnap, momMap, onKeys, clock, s, mayThink); } catch (e) { console.warn('[enaennTracker] moment fade failed', e); }
     return { text: rel.text, meta: { clock, clockSrc: timing.src, dowShift: timing.dowShift || 0, turn, agents: rel.agents, vit: vitMap, prof: profMap, mom: momMap }, elapsed };
+}
+
+// ─── LABEL VOCABULARY ─────────────────────────────────────────────────────────
+// Line labels are PRESENT: and ELSEWHERE: everywhere (tracker prompt, stored snapshots, parsers, main-AI text).
+// Text that still carries the legacy labels (old saved snapshots, a tracker reply that copied them) is converted
+// by code with migrateLabels(); nothing is left to the tracker model.
+const LEGACY_LABELS = { 'ONSCREEN:': 'PRESENT:', 'OFFSCREEN:': 'ELSEWHERE:' };
+function migrateLabels(text) {
+    return String(text ?? '').split('\n').map(line => {
+        const m = line.match(/^(\s*)([A-Z]+:)/);
+        return m && LEGACY_LABELS[m[2]] ? m[1] + LEGACY_LABELS[m[2]] + line.slice(m[0].length) : line;
+    }).join('\n');
+}
+function migrateSnapshotLabels(snap) {
+    if (!snap || typeof snap !== 'object') return false;
+    let changed = false;
+    for (const k of ['raw', 'labeled']) {
+        if (typeof snap[k] !== 'string') continue;
+        const v = migrateLabels(snap[k]);
+        if (v !== snap[k]) { snap[k] = v; changed = true; }
+    }
+    return changed;
 }
 
 // ── what the tracker model sees as "previous state" + system facts ──
@@ -1495,12 +1518,12 @@ function toModelView(prevSnap) {
     for (const line of String(prevSnap?.raw || '').split('\n')) {
         const t = line.trim();
         if (t.startsWith('PROFILE:')) continue;
-        if (t.startsWith('ONSCREEN:')) {
+        if (t.startsWith('PRESENT:')) {
             const f = t.slice(9).split('|').map(x => x.trim());
-            if (f.length >= 18) { out.push(`ONSCREEN: ${[f[0], f[1], f[2], vit[relKey(f[1])]?.act || 'normal', '-', f[9], f[8], f[17]].join(' | ')}`); continue; }
-        } else if (t.startsWith('OFFSCREEN:')) {
+            if (f.length >= 18) { out.push(`PRESENT: ${[f[0], f[1], f[2], vit[relKey(f[1])]?.act || 'normal', '-', f[9], f[8], f[17]].join(' | ')}`); continue; }
+        } else if (t.startsWith('ELSEWHERE:')) {
             const f = t.slice(10).split('|').map(x => x.trim());
-            if (f.length >= 12) { out.push(`OFFSCREEN: ${[f[0], f[1], f[2], f[3], '-'].join(' | ')}`); continue; }
+            if (f.length >= 12) { out.push(`ELSEWHERE: ${[f[0], f[1], f[2], f[3], '-'].join(' | ')}`); continue; }
         }
         out.push(line);
     }
@@ -1513,7 +1536,7 @@ function buildSystemFacts(prevSnap, header) {
     CUR_DOW_SHIFT = dowShift || 0;
     const lines = [];
     const dow = DOW_NAMES[(dowOfDay(Math.floor(clock / 1440)) + CUR_DOW_SHIFT) % 7];
-    lines.push(`IN-GAME TIME NOW: ${header || meta.clockSrc === 'header' ? `${dow} ${hhmm(clock)}` : 'unknown (no date/time header found in the story)'}; time since the previous update: ${elapsed >= 90 ? `${(elapsed / 60).toFixed(1)}h` : `${Math.round(elapsed)} min`}.`);
+    lines.push(`IN-SIMULATION TIME NOW: ${header || meta.clockSrc === 'header' ? `${dow} ${hhmm(clock)}` : 'unknown (no date/time header found in the messages)'}; time since the previous update: ${elapsed >= 90 ? `${(elapsed / 60).toFixed(1)}h` : `${Math.round(elapsed)} min`}.`);
     const vit = meta.vit || {}, prof = meta.prof || {};
     const vlines = [], slines = [];
     for (const v of Object.values(vit)) {
@@ -1524,10 +1547,10 @@ function buildSystemFacts(prevSnap, header) {
         if (p && v.offscreen) { const sl = slotAt(p, clock); slines.push(`${v.name}: ${sl.kind === 'sleep' ? `asleep (until ${hhmm(p.sleep.end)})` : sl.label ? `${sl.label} (${sl.kind}, until ${hhmm(sl.end)})` : `free time${p.note ? ` — ${p.note}` : ''}`}`); }
     }
     if (vlines.length) lines.push('', 'SYSTEM VITALS (calculated by the system as of the previous update — read-only; do NOT output these numbers):', ...vlines);
-    if (slines.length) lines.push('', 'SCHEDULE NOW (what the system expects each off-screen agent to be doing; match it unless the story gives a concrete reason to deviate):', ...slines);
+    if (slines.length) lines.push('', 'SCHEDULE NOW (what the system expects each absent agent to be doing; match it unless the record gives a concrete reason to deviate):', ...slines);
     const known = Object.values(prof).map(p => p.name);
     const nr = getIgnoredNames('rel'), no = getIgnoredNames('off');
-    if (nr.length || no.length) lines.push('', `NOT TRACKED (removed by the player — do not write these lines): ${[nr.length ? `REL for ${nr.join(', ')}` : '', no.length ? `OFFSCREEN for ${no.join(', ')}` : ''].filter(Boolean).join('; ')}.`);
+    if (nr.length || no.length) lines.push('', `NOT TRACKED (removed by the user — do not write these lines): ${[nr.length ? `REL for ${nr.join(', ')}` : '', no.length ? `ELSEWHERE for ${no.join(', ')}` : ''].filter(Boolean).join('; ')}.`);
     lines.push('', `KNOWN PROFILES: ${known.length ? known.join(', ') : 'none'}. Write a PROFILE line for every tracked agent not listed here.`);
     return lines.join('\n');
 }
@@ -1543,8 +1566,8 @@ function parseTrackerData(text) {
         const p = (prefix) => line.slice(prefix.length).split('|').map(s => s.trim());
         if (line.startsWith('LOC:')) {
             data.location = line.slice(4).trim();
-        } else if (line.startsWith('ONSCREEN:')) {
-            const f = p('ONSCREEN:');
+        } else if (line.startsWith('PRESENT:')) {
+            const f = p('PRESENT:');
             if (f.length < 18) continue;
             // Legacy lines (19 fields) carry an impulse at index 17; it is ignored.
             const condIdx = f.length >= 19 ? 18 : 17;
@@ -1570,8 +1593,8 @@ function parseTrackerData(text) {
                 if (f[i] && f[i] !== '-') itm.push({ emoji: f[i], name: f[i+1] || '', val: parseFloat(f[i+2]) || 0 });
             }
             data.relationships.push({ name: f[0], mainVal: parseFloat(f[1]) || 0, mainName: f[2], valence: f[3], duration: f[4], stage: f[5], itm });
-        } else if (line.startsWith('OFFSCREEN:')) {
-            const f = p('OFFSCREEN:');
+        } else if (line.startsWith('ELSEWHERE:')) {
+            const f = p('ELSEWHERE:');
             if (f.length < 12) continue;
             data.offscreen.push({
                 gender: f[0], name: f[1], location: f[2], activity: f[3],
@@ -1684,7 +1707,7 @@ function buildTrackerHTML(data, s, opts) {
     }
 
     if (showOffscreen) {
-        const content = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant off-screen agents.</div></div>' : data.offscreen.map(a => {
+        const content = data.offscreen.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relevant agents elsewhere.</div></div>' : data.offscreen.map(a => {
             const v = a.vitals;
             const nat = findNature(data.nature, a.name);
             const foodItem   = nat && nat.food.hide   ? '' : `${nat ? esc(nat.food.emoji)   : ''}🍴(${esc(v.hunger)})`;
@@ -1696,7 +1719,7 @@ function buildTrackerHTML(data, s, opts) {
             const offEdit = (edit && ov) ? `<div class="enaenn-off-edit">${VITAL_META.map((m, i) => `<span class="enaenn-off-edit-item" title="${m.label}">${m.emoji}<input type="number" class="enaenn-edit-input" data-edit="off-vital" data-agent="${esc(a.name)}" data-vi="${i}" min="0" max="${V_MAX[V_KEYS[i]]}" value="${Math.round(ov.v[V_KEYS[i]])}"></span>`).join('')}</div>` : '';
             return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}${offDel}</div><div class="enaenn-offscreen-vitals">${vitalsLine} // 🎯 ${esc(a.impulse)}</div>${offEdit}${ssrHTML}</div>`;
         }).join('');
-        tabs.push({ label: `🌍 Off‑screen${data.offscreen.length ? ` (${data.offscreen.length})` : ''}`, content });
+        tabs.push({ label: `🌍 Elsewhere${data.offscreen.length ? ` (${data.offscreen.length})` : ''}`, content });
     }
 
     const plansView = data.plans.length === 0 ? '' : `<details class="enaenn-plans"><summary>📅 Future Plans</summary><div class="enaenn-plans-body">${data.plans.map(p => `<div class="enaenn-plan-row"><span class="enaenn-plan-date">${esc(p.date)}</span><span class="enaenn-plan-desc">${esc(p.desc)}</span></div>`).join('')}</div></details>`;
@@ -1715,7 +1738,7 @@ function buildTrackerHTML(data, s, opts) {
         tabsHTML = '<div class="enaenn-alone-msg">All tracked categories are turned off in settings.</div>';
     }
 
-    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}${opts.clockText ? `<span class="enaenn-clock" title="In-game time the tracker is using">🕰️ ${esc(opts.clockText)}</span>` : ''}</div>${tabsHTML}${plans}</div>`;
+    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}${opts.clockText ? `<span class="enaenn-clock" title="In-simulation time the tracker is using">🕰️ ${esc(opts.clockText)}</span>` : ''}</div>${tabsHTML}${plans}</div>`;
 }
 
 // ─── FORMAT TRACKER FOR CONTEXT ───────────────────────────────────────────────
@@ -1741,11 +1764,11 @@ function formatTrackerForContext(raw) {
         const f = t.slice('NATURE:'.length).split('|').map(x => x.trim());
         if (f.length >= 4) natureList.push({ agent: f[0], food: parseNatureMod(f[2]), energy: parseNatureMod(f[3]) });
     }
-    return cleaned.split('\n').map(line => {
+    const mapped = cleaned.split('\n').map(line => {
         const t = line.trim();
         if (!t) return line;
-        if (t.startsWith('ONSCREEN:')) {
-            const parts = t.slice('ONSCREEN:'.length).split('|').map(s => s.trim());
+        if (t.startsWith('PRESENT:')) {
+            const parts = t.slice('PRESENT:'.length).split('|').map(s => s.trim());
             if (parts.length < 18) return line;
             if (parts.length >= 19) parts.splice(17, 1);   // drop legacy impulse
             const vt = VITAL_META.map(m => m.text);
@@ -1757,12 +1780,12 @@ function formatTrackerForContext(raw) {
                 parts[3 + i]  = hidden ? `${vt[i]}:n/a` : `${vt[i]}:${rawVal}`;
                 parts[10 + i] = hidden ? `Δ${vt[i]}:n/a` : `Δ${vt[i]}:${rawDel}`;
             }
-            return 'ONSCREEN: ' + parts.join(' | ');
+            return 'PRESENT: ' + parts.join(' | ');
         }
         if (t.startsWith('REL:')) return 'RELATIONSHIP:' + t.slice('REL:'.length);
         if (t.startsWith('NATURE:')) return 'NATURE: ' + t.slice('NATURE:'.length).split('|').slice(0, 5).map(x => x.trim()).join(' | ');   // feeder type is bookkeeping for the system
-        if (t.startsWith('OFFSCREEN:')) {
-            const parts = t.slice('OFFSCREEN:'.length).split('|').map(s => s.trim());
+        if (t.startsWith('ELSEWHERE:')) {
+            const parts = t.slice('ELSEWHERE:'.length).split('|').map(s => s.trim());
             if (parts.length < 12) return line;
             const labels = ['food', 'energy', 'hygiene', 'bladder', 'thirst', 'arousal', 'stress'];
             const nat = findNature(natureList, parts[1]);
@@ -1771,10 +1794,11 @@ function formatTrackerForContext(raw) {
                 const hidden = nat && ((i === 0 && nat.food.hide) || (i === 1 && nat.energy.hide));
                 parts[4 + i] = hidden ? `${labels[i]}:n/a` : `${labels[i]}:${rawVal}`;
             }
-            return 'OFFSCREEN: ' + parts.join(' | ');
+            return 'ELSEWHERE: ' + parts.join(' | ');
         }
         return line;
     }).join('\n');
+    return mapped;
 }
 
 // ─── SETTINGS / STATE ─────────────────────────────────────────────────────────
@@ -1852,6 +1876,7 @@ function restoreTrackerStateFromLocalStorageIfNeeded(chatId) {
         if (!raw) return false;
         const backup = JSON.parse(raw);
         if (!backup?.snaps?.length) return false;
+        backup.snaps.forEach(migrateSnapshotLabels);   // a backup made before the rename carries the legacy labels
         const states = S().trackerStates || {};
         states[chatId] = backup.snaps;
         save({ trackerStates: states });
@@ -2206,24 +2231,24 @@ function undoLastEdit() {
 // ── the individual edits ──
 function opSetOnscreenVital(ctx, name, vi, val) {
     if (!isFinite(val)) return false;
-    const i = lineIdx(ctx.lines, ['ONSCREEN:'], 1, name); if (i < 0) return false;
+    const i = lineIdx(ctx.lines, ['PRESENT:'], 1, name); if (i < 0) return false;
     const f = lineFields(ctx.lines[i]); if (f.length < 18) return false;
     const vk = V_KEYS[vi]; if (!vk) return false;
     val = clampTo(val, 0, V_MAX[vk]);
     if (Math.abs((parseFloat(f[3 + vi]) || 0) - val) < 0.01) return false;
     f[3 + vi] = fmtNum(val); f[10 + vi] = '—';
-    ctx.lines[i] = 'ONSCREEN: ' + f.join(' | ');
+    ctx.lines[i] = 'PRESENT: ' + f.join(' | ');
     const vit = ctx.meta.vit[relKey(name)]; if (vit) vit.v[vk] = val;
     return true;
 }
 function opSetOnscreenText(ctx, name, field, text) {
-    const i = lineIdx(ctx.lines, ['ONSCREEN:'], 1, name); if (i < 0) return false;
+    const i = lineIdx(ctx.lines, ['PRESENT:'], 1, name); if (i < 0) return false;
     const f = lineFields(ctx.lines[i]); if (f.length < 18) return false;
     const idx = field === 'attire' ? 2 : (f.length >= 19 ? 18 : 17);
     const val = String(text || '').replace(/\|/g, '/').trim() || (field === 'attire' ? '-' : '-');
     if (f[idx] === val) return false;
     f[idx] = val;
-    ctx.lines[i] = 'ONSCREEN: ' + f.join(' | ');
+    ctx.lines[i] = 'PRESENT: ' + f.join(' | ');
     if (field === 'condition') { const vit = ctx.meta.vit[relKey(name)]; if (vit) vit.cond = {}; }   // restart the countdowns from what was typed
     return true;
 }
@@ -2231,7 +2256,7 @@ function opSetOffscreenVital(ctx, name, vi, val) {
     if (!isFinite(val)) return false;
     const key = relKey(name), vit = ctx.meta.vit[key], vk = V_KEYS[vi];
     if (!vit || !vk) return false;
-    const i = lineIdx(ctx.lines, ['OFFSCREEN:'], 1, name); if (i < 0) return false;
+    const i = lineIdx(ctx.lines, ['ELSEWHERE:'], 1, name); if (i < 0) return false;
     val = clampTo(val, 0, V_MAX[vk]);
     if (Math.abs(vit.v[vk] - val) < 0.5) return false;
     vit.v[vk] = val;
@@ -2240,7 +2265,7 @@ function opSetOffscreenVital(ctx, name, vi, val) {
     const labels = vitalLabels(vit);
     for (let k = 0; k < 7; k++) f[4 + k] = labels[k];
     f[11] = impulseText(vit, ctx.meta.prof[key] || DEFAULT_PROFILE, ctx.meta.clock ?? 0);
-    ctx.lines[i] = 'OFFSCREEN: ' + f.join(' | ');
+    ctx.lines[i] = 'ELSEWHERE: ' + f.join(' | ');
     return true;
 }
 function opSetRelMain(ctx, name, val) {
@@ -2278,9 +2303,9 @@ function opDeleteRel(ctx, name) {
     return true;
 }
 function opDeleteOffscreen(ctx, name) {
-    const i = lineIdx(ctx.lines, ['OFFSCREEN:'], 1, name); if (i < 0) return false;
+    const i = lineIdx(ctx.lines, ['ELSEWHERE:'], 1, name); if (i < 0) return false;
     ctx.lines[i] = null;
-    if (lineIdx(ctx.lines, ['ONSCREEN:'], 1, name) < 0) {            // not in the scene either: drop everything tied to this character
+    if (lineIdx(ctx.lines, ['PRESENT:'], 1, name) < 0) {            // not in the scene either: drop everything tied to this character
         delete ctx.meta.vit[relKey(name)];
         for (let k = 0; k < ctx.lines.length; k++) if (ctx.lines[k] != null && /^(SSR|NATURE):/.test(ctx.lines[k].trim()) && relKey(lineFields(ctx.lines[k])[0]) === relKey(name)) ctx.lines[k] = null;
     }
@@ -2335,7 +2360,7 @@ function restoreOverlayUI(body, st) {
 }
 function buildEditBar(chatId) {
     const ign = [...getIgnoredNames('rel').map(n => ({ k: 'rel', n })), ...getIgnoredNames('off').map(n => ({ k: 'off', n }))];
-    const chips = ign.length ? `<div class="enaenn-ign">🚫 Not tracked: ${ign.map(x => `<span class="enaenn-chip" data-act="unignore" data-kind="${x.k}" data-agent="${esc(x.n)}" title="Click to track again">${esc(x.n)} <small>${x.k === 'rel' ? 'relations' : 'off-screen'}</small> ✕</span>`).join('')}</div>` : '';
+    const chips = ign.length ? `<div class="enaenn-ign">🚫 Not tracked: ${ign.map(x => `<span class="enaenn-chip" data-act="unignore" data-kind="${x.k}" data-agent="${esc(x.n)}" title="Click to track again">${esc(x.n)} <small>${x.k === 'rel' ? 'relations' : 'elsewhere'}</small> ✕</span>`).join('')}</div>` : '';
     const canUndo = EDIT_UNDO.some(u => u.chatId === chatId);
     return `<div class="enaenn-editbar"><span>✏️ Editing — instant, uses no tokens</span><span class="enaenn-editbar-btns"><button class="enaenn-edit-btn" data-act="undo"${canUndo ? '' : ' disabled'}>↩️ Undo</button><button class="enaenn-edit-btn" data-act="done">Done</button></span></div>${chips}`;
 }
@@ -2393,7 +2418,7 @@ function onOverlayEditClick(e) {
 }
 
 // ─── CONTEXT INJECTION (main chat — tracker state only) ───────────────────────
-// NOTE: Only the compact tracker state (LOC/ONSCREEN/REL/etc.) is ever injected
+// NOTE: Only the compact tracker state (LOC/PRESENT/REL/etc.) is ever injected
 // into the main chat context. Character description and world info are sent
 // exclusively to the tracker's own API call and never reach the chat AI.
 
@@ -2404,9 +2429,9 @@ function filterInjectionByCategory(text, s) {
     s = s || S();
     return text.split('\n').filter(line => {
         const t = line.trim();
-        if (t.startsWith('ONSCREEN:')) return s.trackOnscreen !== false;
+        if (t.startsWith('PRESENT:')) return s.trackOnscreen !== false;
         if (t.startsWith('RELATIONSHIP:') || t.startsWith('REL:')) return s.trackRelationships !== false;
-        if (t.startsWith('OFFSCREEN:')) return s.trackOffscreen !== false;
+        if (t.startsWith('ELSEWHERE:')) return s.trackOffscreen !== false;
         if (t.startsWith('PROFILE:')) return false;  // schedules are the tracker's own bookkeeping
         if (t.startsWith('SSR:') || t.startsWith('NATURE:')) return s.trackOnscreen !== false || s.trackOffscreen !== false;
         return true;
@@ -2416,7 +2441,9 @@ function filterInjectionByCategory(text, s) {
 function getInjectionText(chatId) {
     const snap = getCurrentSnapshot(chatId);
     if (!snap) return '';
-    const body = filterInjectionByCategory(snap.labeled, S());
+    let text = snap.labeled;
+    try { if (snap.raw) text = formatTrackerForContext(snap.raw); } catch (e) { console.warn('[enaennTracker] injection text fallback', e); }
+    const body = filterInjectionByCategory(text, S());
     return `\n\n[TRACKER STATE]\n${body}\n[/TRACKER STATE]\n`;
 }
 
@@ -2492,7 +2519,7 @@ function buildTrackerPrompt(chatId) {
     const assembled =
         charBlock +
         wiBlock +
-        `RECENT ROLEPLAY (${historyMessages.length} messages):\n${chatText}\n\n---\n\n` +
+        `RECENT MESSAGES (${historyMessages.length} messages):\n${chatText}\n\n---\n\n` +
         `${prevState}\n\n${systemFacts}\n\n---\n\n` +
         (newestBlock ? `${newestBlock}\n\n---\n\n` : '') +
         `Output the updated tracker data in the exact plain-text format specified. Nothing else.`;
@@ -2858,12 +2885,13 @@ async function updateTracker() {
 
     // All numbers are calculated here, not by the tracker model: in-game time, vitals, off-screen routines,
     // schedules, relationship limits.
+    const rawInternal = migrateLabels(rawResult);   // a reply that still carries the legacy labels is converted here, by code
     let limited;
     try {
-        limited = applySystemCalculations(rawResult, getCurrentSnapshot(chatId), S(), { header: getNewestHeader(), userNames: getUserNames() });
+        limited = applySystemCalculations(rawInternal, getCurrentSnapshot(chatId), S(), { header: getNewestHeader(), userNames: getUserNames() });
     } catch (err) {
         console.error('[enaennTracker] system calculations failed, saving the tracker output as written:', err);
-        limited = { text: rawResult, meta: getCurrentSnapshot(chatId)?.meta || null };
+        limited = { text: rawInternal, meta: getCurrentSnapshot(chatId)?.meta || null };
     }
     const finalRaw = limited.text;
 
@@ -2964,7 +2992,7 @@ const SETTINGS_HTML = `
       </div>
 
       <div class="flex-container flexGap5 alignItemsCenter enaenn-gap">
-        <label style="white-space:nowrap; min-width:175px;">Roleplay messages sent to tracker:</label>
+        <label style="white-space:nowrap; min-width:175px;">Messages sent to tracker:</label>
         <input type="number" id="enaennTracker_ctxSize" min="5" max="100" class="text_pole" style="width:60px;" />
       </div>
 
@@ -2980,14 +3008,14 @@ const SETTINGS_HTML = `
       <div class="enaenn-gap" style="font-weight:bold;">🗂️ Tracked Categories</div>
       <small style="opacity:0.6;">
         Turn a category off to stop the tracker from generating it at all (saves tokens on every tracker call),
-        hide its tab from the overlay, and keep it out of what gets sent to your main roleplay API.
+        hide its tab from the overlay, and keep it out of what gets sent to your main API.
         Re-enabling starts fresh for that category — it won't remember old values.
       </small>
 
       <div class="flex-container flexGap5 enaenn-gap" style="margin-top:6px;">
         <label class="checkbox_label">
           <input type="checkbox" id="enaennTracker_trackOnscreen" />
-          <span>💖 Present / on-screen agents</span>
+          <span>💖 Present agents</span>
         </label>
       </div>
       <div class="flex-container flexGap5 enaenn-gap">
@@ -2999,13 +3027,13 @@ const SETTINGS_HTML = `
       <div class="flex-container flexGap5 enaenn-gap">
         <label class="checkbox_label">
           <input type="checkbox" id="enaennTracker_trackOffscreen" />
-          <span>🌍 Off-screen agents</span>
+          <span>🌍 Agents elsewhere</span>
         </label>
       </div>
       <div class="enaenn-gap" style="margin-top:6px;">
         <div>🧲 Fixated agents</div>
         <input type="text" id="enaennTracker_fixatedAgents" class="text_pole" placeholder="e.g. Lysa" style="width:100%;" />
-        <small style="opacity:0.6;">Comma-separated names. Only these off-screen agents may keep thinking about {{user}} without a reason (open promise, plan, strong feeling). Use it for characters whose card says they are obsessed.</small>
+        <small style="opacity:0.6;">Comma-separated names. Only these agents elsewhere may keep thinking about {{user}} without a reason (open promise, plan, strong feeling). Use it for characters whose card says they are obsessed.</small>
       </div>
       <div class="enaenn-gap" style="margin-top:6px;">
         <div>⚡ Volatile agents</div>
@@ -3013,10 +3041,10 @@ const SETTINGS_HTML = `
         <small style="opacity:0.6;">Comma-separated names. These agents may swing faster (±60/day instead of ±20). Limits are enforced by the extension, not the tracker model.</small>
       </div>
       <div class="enaenn-gap" style="margin-top:6px;">
-        <div>🌫️ Off-screen fading</div>
+        <div>🌫️ Fading elsewhere</div>
         <div>In-the-moment feelings, base half-life (hours): <input type="number" id="enaennTracker_momentFadeHours" min="0" max="48" step="0.5" class="text_pole" style="width:60px;" /></div>
         <div>Main feeling drift while away (± points/day): <input type="number" id="enaennTracker_mainDriftPerDay" min="0" max="50" step="1" class="text_pole" style="width:60px;" /></div>
-        <small style="opacity:0.6;">When an agent leaves the scene, their "in the moment" feelings fade (half-life ≈ this many hours; stronger feelings last longer, agents who keep thinking about {{user}} 3x longer) and vanish below 8. After ~6h away the Main feeling slowly wobbles by up to the set points per day. 0 turns either off.</small>
+        <small style="opacity:0.6;">When an agent is no longer present, their "in the moment" feelings fade (half-life ≈ this many hours; stronger feelings last longer, agents who keep thinking about {{user}} 3x longer) and vanish below 8. After ~6h away the Main feeling slowly wobbles by up to the set points per day. 0 turns either off.</small>
       </div>
       <details class="enaenn-gap" style="margin-top:6px;">
         <summary>🗓️ Agent profiles (schedules)</summary>
@@ -3335,10 +3363,29 @@ function addToolbarButton() {
     console.warn('[enaennTracker] Could not find toolbar container for 📊 button.');
 }
 
+const LABELS_MIGRATION_VERSION = 2;
+// One-time sweep after the update: every saved snapshot (raw tracker text and main-AI text) gets the new labels.
+// Backups restored from localStorage go through the same conversion (see restoreTrackerStateFromLocalStorageIfNeeded).
+function migrateStoredLabels() {
+    const st = extension_settings[MODULE_NAME];
+    if (!st || (st.labelsMigrated || 0) >= LABELS_MIGRATION_VERSION) return;
+    let n = 0;
+    for (const snaps of Object.values(st.trackerStates || {})) {
+        if (!Array.isArray(snaps)) continue;
+        for (const snap of snaps) {
+            try { if (migrateSnapshotLabels(snap)) n++; }
+            catch (e) { console.warn('[enaennTracker] label migration skipped a snapshot', e); }
+        }
+    }
+    save({ labelsMigrated: LABELS_MIGRATION_VERSION });
+    console.info(`[enaennTracker] label migration: converted ${n} stored snapshot(s)`);
+}
+
 // ─── INIT ─────────────────────────────────────────────────────────────────────
 
 jQuery(async () => {
     initSettings();
+    try { migrateStoredLabels(); } catch (e) { console.warn('[enaennTracker] label migration failed', e); }
     createOverlay();
 
     $('#extensions_settings2').append(SETTINGS_HTML);
