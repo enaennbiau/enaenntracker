@@ -856,7 +856,7 @@ function parseSettingHeader(text) {
     const days = daysFromCivil(+dm[4], mon, day);
     const start = days * 1440 + sh * 60 + sm;
     let end = days * 1440 + eh * 60 + em;
-    if (end < start) end += 1440;          // segment crosses midnight
+    if (end < start) end = (start - end > 720) ? end + 1440 : start;   // a real midnight crossing is <12h long; a range like 12:50—01:12 is a typo, not +12h
     const wd = dm[1] ? DOW_IDX[dm[1].toLowerCase().slice(0, 3)] : undefined;
     const dowShift = wd != null ? (((wd - dowOfDay(days)) % 7) + 7) % 7 : null;
     return { start, end, dowShift };
@@ -868,8 +868,8 @@ function computeTiming(prevMeta, header) {
     const shift = header?.dowShift ?? prevMeta?.dowShift ?? 0;
     if (header) {
         if (prevClock == null || prevSrc !== 'header') return { clock: header.end, elapsed: 0, src: 'header', dowShift: shift };
-        const clock = Math.max(prevClock, header.end);
-        return { clock, elapsed: Math.min(MAX_ELAPSED_MIN, clock - prevClock), src: 'header', dowShift: shift };
+        const clock = header.end;                                   // trust the message header, even if it is earlier than the stored clock (resync)
+        return { clock, elapsed: Math.max(0, Math.min(MAX_ELAPSED_MIN, clock - prevClock)), src: 'header', dowShift: shift };
     }
     if (prevClock == null) return { clock: 0, elapsed: 0, src: prevSrc || 'fallback', dowShift: shift };
     return { clock: prevClock + REL_FALLBACK_MINUTES, elapsed: REL_FALLBACK_MINUTES, src: prevSrc || 'fallback', dowShift: shift };
@@ -1293,6 +1293,9 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     const isFixated = (name) => { const k = relKey(name); return fixated.some(v => v === k || k.split(' ')[0] === v || v.split(' ')[0] === k); };
 
     const vitMap = JSON.parse(JSON.stringify(prevMeta.vit || {}));
+    if (timing.src === 'header' && prevMeta.clock != null && (prevMeta.clockSrc || 'fallback') !== 'header') {
+        for (const v of Object.values(vitMap)) { v.t = clock; v.mods = []; v.cond = {}; }   // new timeline: nothing has elapsed yet
+    }
     // schedules live in a per-chat store as well as in the snapshot, so a snapshot without meta (swipe, delete, old save) can't wipe them
     const storedProf = JSON.parse(JSON.stringify((s.profileStore || {})[getChatId()] || {}));
     const profMap = Object.assign(storedProf, JSON.parse(JSON.stringify(prevMeta.prof || {})));
@@ -1395,7 +1398,7 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
             if (!fresh) {
                 // The reported activity describes the state NOW (e.g. "normal" right after waking up),
                 // so it must not be applied to the whole elapsed period: a 6h sleep would be charged as 6h of decay.
-                const t0 = vit.t ?? clock, span = clock - t0;
+                const t0 = Math.min(Math.max(vit.t ?? clock, clock - MAX_ELAPSED_MIN), clock), span = clock - t0;
                 const wasAsleep = vit.act === 'sleep';
                 let sleepMin = ev.sleptMin || 0;
                 if (!sleepMin && wasAsleep && act !== 'sleep') sleepMin = Math.min(span, 10 * 60);   // was asleep at the last update, awake now: assume a normal night
@@ -1423,7 +1426,7 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
         } else {
             vit.offscreen = true;
             const ev = legacy ? { tags: [], adj: [] } : parseEvents(f[4]);
-            if (!fresh) advanceVitals(vit, vit.t ?? clock, clock, (tt) => actFromSlot(slotAt(prof, tt)), makeRoutine(name, prof, skipFromEvents(ev)));
+            if (!fresh) advanceVitals(vit, Math.min(Math.max(vit.t ?? clock, clock - MAX_ELAPSED_MIN), clock), clock, (tt) => actFromSlot(slotAt(prof, tt)), makeRoutine(name, prof, skipFromEvents(ev)));
             applyEvents(vit, ev, clock);
             vit.t = clock;
             vit.act = actFromSlot(slotAt(prof, clock));
