@@ -1287,6 +1287,9 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     const { clock, elapsed } = timing;
     CUR_DOW_SHIFT = timing.dowShift || 0;
     const prevClock = prevMeta.clock ?? clock;
+    try {
+        console.info(`[enaennTracker 1.4.2-clockfix] clock: message header ${ctx?.header ? hhmm(ctx.header.start) + '—' + hhmm(ctx.header.end) : 'NOT FOUND'} | stored ${prevMeta.clock != null ? clockLabel(prevMeta) : 'none'} → now ${clockLabel({ clock, dowShift: timing.dowShift })} (+${Math.round(elapsed)} min, source: ${timing.src})`);
+    } catch { /* logging only */ }
     const turn = (prevMeta.turn || 0) + 1;
     const userNames = ctx?.userNames || [];
     const fixated = String(s.fixatedAgents || '').split(',').map(relKey).filter(Boolean);
@@ -3480,5 +3483,5 @@ jQuery(async () => {
         setTimeout(populateProfileDropdown, 500);
     });
 
-    console.log('[enaennTracker] Loaded successfully.');
+    console.log('[enaennTracker] Loaded successfully. Build: 1.4.2-clockfix');
 });
