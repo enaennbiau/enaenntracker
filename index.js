@@ -1288,7 +1288,7 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     CUR_DOW_SHIFT = timing.dowShift || 0;
     const prevClock = prevMeta.clock ?? clock;
     try {
-        console.info(`[enaennTracker 1.4.2-clockfix] clock: message header ${ctx?.header ? hhmm(ctx.header.start) + '—' + hhmm(ctx.header.end) : 'NOT FOUND'} | stored ${prevMeta.clock != null ? clockLabel(prevMeta) : 'none'} → now ${clockLabel({ clock, dowShift: timing.dowShift })} (+${Math.round(elapsed)} min, source: ${timing.src})`);
+        console.info(`[enaennTracker 1.4.4-ui] clock: message header ${ctx?.header ? hhmm(ctx.header.start) + '—' + hhmm(ctx.header.end) : 'NOT FOUND'} | stored ${prevMeta.clock != null ? clockLabel(prevMeta) : 'none'} → now ${clockLabel({ clock, dowShift: timing.dowShift })} (+${Math.round(elapsed)} min, source: ${timing.src})`);
     } catch { /* logging only */ }
     const turn = (prevMeta.turn || 0) + 1;
     const userNames = ctx?.userNames || [];
@@ -1674,13 +1674,16 @@ function buildVitalsHTML(vitals, nature, opts) {
 // their own foldable container, reusing the exact same classes as the
 // standard vitals fold so no new CSS is needed. Kept separate from the
 // standard vitals fold so it never appears for agents without an SSR.
-function buildSSRHTML(ssrList) {
+function buildSSRHTML(ssrList, opts) {
+    const edit = !!(opts && opts.edit);
     if (!ssrList || !ssrList.length) return '';
     const rows = ssrList.map(r => {
         const colorCls  = vitalColorClass(r.polarity, r.val);
         const barWidth  = Math.min(r.val, 100);
-        const boostHTML = r.boost ? `<div class="enaenn-condition">✨ ${esc(r.boost)}</div>` : '';
-        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${esc(r.emoji)}</span><span class="enaenn-vital-label">${esc(r.name)}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div><span class="enaenn-vital-val">${r.val}%</span><span class="enaenn-vital-delta">(${esc(r.delta)})</span></div>${boostHTML}`;
+        const boostHTML = edit
+            ? `<div class="enaenn-condition-edit">✨ <input class="enaenn-edit-input enaenn-edit-text" data-edit="ssr-boost" data-agent="${esc(r.agent)}" value="${esc(r.boost || '')}" placeholder="no boost" title="Temporary enhancement (empty = none)"></div>`
+            : (r.boost ? `<div class="enaenn-condition">✨ ${esc(r.boost)}</div>` : '');
+        return `<div class="enaenn-vital-row"><span class="enaenn-vital-emoji">${esc(r.emoji)}</span><span class="enaenn-vital-label">${esc(r.name)}</span><div class="enaenn-vital-bar-wrap"><div class="enaenn-vital-fill ${colorCls}" style="width:${barWidth}%"></div></div>${edit ? `<input type="number" class="enaenn-edit-input enaenn-edit-vital" data-edit="ssr-val" data-agent="${esc(r.agent)}" min="0" max="100" value="${r.val}" title="0–100">` : `<span class="enaenn-vital-val">${r.val}%</span>`}<span class="enaenn-vital-delta">(${esc(r.delta)})</span></div>${boostHTML}`;
     }).join('');
     return `<details class="enaenn-vitals-fold"><summary>Resources</summary><div class="enaenn-vitals">${rows}</div></details>`;
 }
@@ -1702,10 +1705,10 @@ function buildTrackerHTML(data, s, opts) {
             const cond   = a.condition ? `<div class="enaenn-condition">🩹 ${esc(a.condition)}</div>` : '';
             const attireHTML = edit ? `<input class="enaenn-edit-input enaenn-edit-text" data-edit="attire" data-agent="${esc(a.name)}" value="${esc(a.attire)}" title="Outfit">` : `<span class="enaenn-agent-attire">👗 ${esc(a.attire)}</span>`;
             const condHTML = edit ? `<div class="enaenn-condition-edit">🩹 <input class="enaenn-edit-input enaenn-edit-text" data-edit="condition" data-agent="${esc(a.name)}" value="${esc(a.condition || '')}" placeholder="no conditions" title="Injuries, buffs, debuffs (empty = none)"></div>` : cond;
-            const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
+            const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name), { edit });
             const nat = findNature(data.nature, a.name);
             const natureLine = nat ? `<div class="enaenn-impulse">🧬 ${esc(nat.species)}${nat.note ? ' — ' + esc(nat.note) : ''}</div>` : '';
-            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span>${attireHTML}</div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals, findNature(data.nature, a.name), { edit, agent: a.name })}</div></details>${ssrHTML}${condHTML}${natureLine}</div>`;
+            return `<div class="enaenn-agent-row"><div class="enaenn-agent-header"><span class="enaenn-agent-name">${esc(a.gender)} ${esc(a.name)}</span>${edit ? `<input class="enaenn-edit-input enaenn-edit-emoji" data-edit="gender" data-agent="${esc(a.name)}" value="${esc(a.gender)}" title="Gender emoji">` : ''}${attireHTML}</div><details class="enaenn-vitals-fold"><summary>Vitals</summary><div class="enaenn-vitals">${buildVitalsHTML(a.vitals, findNature(data.nature, a.name), { edit, agent: a.name })}</div></details>${ssrHTML}${condHTML}${natureLine}</div>`;
         }).join('<div class="enaenn-agent-sep"></div>');
         tabs.push({ label: `💖 Present${data.agents.length ? ` (${data.agents.length})` : ''}`, content });
     }
@@ -1714,10 +1717,25 @@ function buildTrackerHTML(data, s, opts) {
         const inner = data.relationships.length === 0 ? '<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">No relationships tracked yet.</div></div>' : data.relationships.map(r => {
             const barClass = r.valence === '-' ? 'enaenn-rel-fill-neg' : 'enaenn-rel-fill';
             const barWidth = Math.min((r.mainVal / 1000) * 100, 100).toFixed(1);
-            const itmHTML  = r.itm.map((f, mi) => `<div class="enaenn-rel-moment-row"><span>${esc(f.emoji)} ${esc(f.name)}</span><div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:${f.val}%"></div></div><span class="enaenn-rel-moment-val">${f.val}</span>${edit ? `<button class="enaenn-del" data-act="del-moment" data-agent="${esc(r.name)}" data-mi="${mi}" title="Remove this feeling">✕</button>` : ''}</div>`).join('');
+            const stripCh = (t) => String(t ?? '').replace(CHANGE_RE, '').trim();
+            const rAg = `data-agent="${esc(r.name)}"`;
+            const mainNameHTML = edit ? `<input class="enaenn-edit-input enaenn-edit-mainname" data-edit="rel-name" ${rAg} value="${esc(stripCh(r.mainName))}" title="Main feeling name">` : `<span>${esc(r.mainName)}</span>`;
+            const stageHTML = edit
+                ? `<div class="enaenn-rel-stage enaenn-rel-edit">Known <input class="enaenn-edit-input enaenn-edit-dur" data-edit="rel-dur" ${rAg} value="${esc(r.duration)}" title="Known for…"> · <input class="enaenn-edit-input enaenn-edit-stage" data-edit="rel-stage" ${rAg} value="${esc(r.stage)}" title="Relationship stage"> <select class="enaenn-edit-input" data-edit="rel-valence" ${rAg} title="Positive or negative feeling"><option value="+"${r.valence === '-' ? '' : ' selected'}>＋ positive</option><option value="-"${r.valence === '-' ? ' selected' : ''}>− negative</option></select></div>`
+                : `<div class="enaenn-rel-stage">Known ${esc(r.duration)} · ${esc(r.stage)}</div>`;
+            const itmHTML  = r.itm.map((f, mi) => {
+                const who = `data-agent="${esc(r.name)}" data-mi="${mi}"`;
+                const label = edit
+                    ? `<span class="enaenn-rel-moment-edit"><input class="enaenn-edit-input enaenn-edit-emoji" data-edit="rel-itm-emoji" ${who} value="${esc(f.emoji)}" title="Emoji"><input class="enaenn-edit-input enaenn-edit-itmname" data-edit="rel-itm-name" ${who} value="${esc(String(f.name).replace(CHANGE_RE, '').trim())}" title="Feeling name"></span>`
+                    : `<span>${esc(f.emoji)} ${esc(f.name)}</span>`;
+                const valHTML = edit
+                    ? `<input type="number" class="enaenn-edit-input enaenn-edit-itm" data-edit="rel-itm-val" ${who} min="0" max="100" value="${f.val}" title="0–100">`
+                    : `<span class="enaenn-rel-moment-val">${f.val}</span>`;
+                return `<div class="enaenn-rel-moment-row">${label}<div class="enaenn-rel-moment-bar-wrap"><div class="enaenn-rel-moment-fill" style="width:${f.val}%"></div></div>${valHTML}${edit ? `<button class="enaenn-del" data-act="del-moment" ${who} title="Remove this feeling">✕</button>` : ''}</div>`;
+            }).join('') + (edit && r.itm.length < 4 ? `<button class="enaenn-edit-btn" data-act="add-moment" data-agent="${esc(r.name)}">＋ feeling</button>` : '');
             const relDel = edit ? `<button class="enaenn-del" data-act="del-rel" data-agent="${esc(r.name)}" title="Stop tracking this relationship">🗑</button>` : '';
             const mainValHTML = edit ? `<input type="number" class="enaenn-edit-input enaenn-edit-main" data-edit="relmain" data-agent="${esc(r.name)}" min="0" max="1000" value="${r.mainVal}" title="Main feeling, 0–1000"><span class="enaenn-rel-val">/1000</span>` : `<span class="enaenn-rel-val">(${r.mainVal}/1000)</span>`;
-            return `<details class="enaenn-rel-fold"><summary><span class="enaenn-rel-fold-name">${esc(r.name)} → User</span><span class="enaenn-rel-fold-preview">${esc(r.mainName)} (${r.mainVal}/1000)</span>${relDel}</summary><div class="enaenn-rel-fold-body"><div class="enaenn-rel-main"><span>${esc(r.mainName)}</span><div class="enaenn-rel-bar-wrap"><div class="${barClass}" style="width:${barWidth}%"></div></div>${mainValHTML}</div><div class="enaenn-rel-moments">${itmHTML}</div><div class="enaenn-rel-stage">Known ${esc(r.duration)} · ${esc(r.stage)}</div></div></details>`;
+            return `<details class="enaenn-rel-fold"><summary><span class="enaenn-rel-fold-name">${esc(r.name)} → User</span><span class="enaenn-rel-fold-preview">${esc(r.mainName)} (${r.mainVal}/1000)</span>${relDel}</summary><div class="enaenn-rel-fold-body"><div class="enaenn-rel-main">${mainNameHTML}<div class="enaenn-rel-bar-wrap"><div class="${barClass}" style="width:${barWidth}%"></div></div>${mainValHTML}</div><div class="enaenn-rel-moments">${itmHTML}</div>${stageHTML}</div></details>`;
         }).join('');
         tabs.push({ label: `💕 Relations${data.relationships.length ? ` (${data.relationships.length})` : ''}`, content: `<div class="enaenn-rel-list">${inner}</div>` });
     }
@@ -1729,11 +1747,14 @@ function buildTrackerHTML(data, s, opts) {
             const foodItem   = nat && nat.food.hide   ? '' : `${nat ? esc(nat.food.emoji)   : ''}🍴(${esc(v.hunger)})`;
             const energyItem = nat && nat.energy.hide ? '' : `${nat ? esc(nat.energy.emoji) : ''}😴(${esc(v.energy)})`;
             const vitalsLine = [foodItem, energyItem, `🚿(${esc(v.clean)})`, `🚽(${esc(v.bladder)})`, `💧(${esc(v.thirst)})`, `🔥(${esc(v.arousal)})`, `🧠(${esc(v.stress)})`].filter(Boolean).join(' | ');
-            const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name));
+            const ssrHTML = buildSSRHTML((data.ssr || []).filter(r => r.agent === a.name), { edit });
             const ov = opts.vit?.[relKey(a.name)];
             const offDel = edit ? `<button class="enaenn-del" data-act="del-off" data-agent="${esc(a.name)}" title="Remove this character from the tracker">🗑</button>` : '';
+            const offAg = `data-agent="${esc(a.name)}"`;
+            const locH = edit ? `<input class="enaenn-edit-input enaenn-edit-offloc" data-edit="off-loc" ${offAg} value="${esc(a.location)}" title="Location">` : esc(a.location);
+            const actH = edit ? `<input class="enaenn-edit-input enaenn-edit-offact" data-edit="off-act" ${offAg} value="${esc(a.activity)}" title="Activity">` : esc(a.activity);
             const offEdit = (edit && ov) ? `<div class="enaenn-off-edit">${VITAL_META.map((m, i) => `<span class="enaenn-off-edit-item" title="${m.label}">${m.emoji}<input type="number" class="enaenn-edit-input" data-edit="off-vital" data-agent="${esc(a.name)}" data-vi="${i}" min="0" max="${V_MAX[V_KEYS[i]]}" value="${Math.round(ov.v[V_KEYS[i]])}"></span>`).join('')}</div>` : '';
-            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${esc(a.location)} // ${esc(a.activity)}${offDel}</div><div class="enaenn-offscreen-vitals">${vitalsLine} // 🎯 ${esc(a.impulse)}</div>${offEdit}${ssrHTML}</div>`;
+            return `<div class="enaenn-offscreen-row"><div class="enaenn-offscreen-name">${esc(a.gender)} ${esc(a.name)} — 📍${locH} // ${actH}${offDel}</div><div class="enaenn-offscreen-vitals">${vitalsLine} // 🎯 ${esc(a.impulse)}</div>${offEdit}${ssrHTML}</div>`;
         }).join('');
         tabs.push({ label: `🌍 Elsewhere${data.offscreen.length ? ` (${data.offscreen.length})` : ''}`, content });
     }
@@ -1754,7 +1775,7 @@ function buildTrackerHTML(data, s, opts) {
         tabsHTML = '<div class="enaenn-alone-msg">All tracked categories are turned off in settings.</div>';
     }
 
-    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${esc(data.location)}${opts.clockText ? `<span class="enaenn-clock" title="In-simulation time the tracker is using">🕰️ ${esc(opts.clockText)}</span>` : ''}</div>${tabsHTML}${plans}</div>`;
+    return `<div class="enaenn-tracker-block"><div class="enaenn-location">📍 ${edit ? `<input class="enaenn-edit-input enaenn-edit-text enaenn-edit-loc" data-edit="loc" value="${esc(data.location)}" title="Scene location">` : esc(data.location)}${opts.clockText ? `<span class="enaenn-clock" title="In-simulation time the tracker is using">🕰️ ${esc(opts.clockText)}</span>` : ''}</div>${tabsHTML}${plans}</div>`;
 }
 
 // ─── FORMAT TRACKER FOR CONTEXT ───────────────────────────────────────────────
@@ -1917,26 +1938,58 @@ function saveSnapshot(chatId, rawText, labeledText, htmlContent, parsedData, met
     let snaps = getSnapshots(chatId);
     const windowSize = S().windowSize || 7;
     EDIT_UNDO.length = 0;                       // manual-edit undo only makes sense for the newest snapshot
+    for (let i = RESTORE_UNDO.length - 1; i >= 0; i--) if (RESTORE_UNDO[i].chatId === chatId) RESTORE_UNDO.splice(i, 1);   // a fresh update ends the "undo restore" history
     snaps.push({ raw: rawText, labeled: labeledText, html: htmlContent, parsed: parsedData, meta });
     if (snaps.length > windowSize) snaps = snaps.slice(-windowSize);
     setSnapshots(chatId, snaps);
     updateOverlayContent(chatId);
-    refreshExtensionPrompt();
+    refreshExtensionPrompt();    updateRestoreUndoUI();
+}
+
+// Snapshots removed by "Restore previous", so that action can itself be undone (in memory, per chat).
+const RESTORE_UNDO = [];   // { chatId, removed: [snapshot, …] }
+const restoreUndoAvailable = () => RESTORE_UNDO.some(r => r.chatId === getChatId());
+function updateRestoreUndoUI() {
+    const off = _updating || !restoreUndoAvailable();
+    $('#enaennTracker_undoRestoreBtn, #enaenn-overlay-undorestore').prop('disabled', off);
+}
+function undoRestore() {
+    const chatId = getChatId();
+    for (let i = RESTORE_UNDO.length - 1; i >= 0; i--) {
+        if (RESTORE_UNDO[i].chatId !== chatId) continue;
+        const rec = RESTORE_UNDO.splice(i, 1)[0];
+        const snaps = getSnapshots(chatId).concat(rec.removed).slice(-(S().windowSize || 7));
+        EDIT_UNDO.length = 0;
+        setSnapshots(chatId, snaps);
+        updateOverlayContent(chatId);
+        refreshExtensionPrompt();
+        updateRestoreUndoUI();
+        toastr.success('Undid the restore — snapshot brought back.');
+        return true;
+    }
+    toastr.info('Nothing to undo.');
+    updateRestoreUndoUI();
+    return false;
 }
 
 function restorePreviousSnapshot(chatId) {
     let snaps = getSnapshots(chatId);
     if (snaps.length <= 1) {
+        if (snaps.length) RESTORE_UNDO.push({ chatId, removed: snaps.slice() });
         setSnapshots(chatId, []);
         refreshExtensionPrompt();
+        updateRestoreUndoUI();
         return null;
     }
     EDIT_UNDO.length = 0;
-    snaps.pop();
+    const gone = snaps.pop();
+    RESTORE_UNDO.push({ chatId, removed: [gone] });
+    if (RESTORE_UNDO.length > 30) RESTORE_UNDO.shift();
     setSnapshots(chatId, snaps);
     const restored = snaps[snaps.length - 1] || null;
     updateOverlayContent(chatId);
     refreshExtensionPrompt();
+    updateRestoreUndoUI();
     return restored;
 }
 
@@ -2036,6 +2089,7 @@ function createOverlay() {
                 <button id="enaenn-overlay-edit" title="Edit the tracker by hand (no AI calls)">✏️</button>
                 <button id="enaenn-overlay-refresh" title="Refresh tracker now">🔄</button>
                 <button id="enaenn-overlay-restore" title="Restore previous tracker snapshot">♻️</button>
+                <button id="enaenn-overlay-undorestore" title="Undo “Restore previous” (bring the removed snapshot back)" disabled>↪️</button>
                 <button id="enaenn-overlay-stop" title="Stop tracker generation">⏹️</button>
                 <button id="enaenn-overlay-collapse" title="Collapse/Expand">▸</button>
                 <button id="enaenn-overlay-close" title="Close overlay">✕</button>
@@ -2118,6 +2172,8 @@ function createOverlay() {
         .addEventListener('click', () => updateTracker());
     overlay.querySelector('#enaenn-overlay-restore')
         .addEventListener('click', () => { deleteLastTracker(); });
+    overlay.querySelector('#enaenn-overlay-undorestore')
+        .addEventListener('click', () => undoRestore());
     overlay.querySelector('#enaenn-overlay-stop')
         .addEventListener('click', () => abortTrackerUpdate());
 
@@ -2350,6 +2406,87 @@ function opAddPlan(ctx) {
     return true;
 }
 
+// ── more manual edits: location, gender, relationship texts, feelings, elsewhere texts, resources ──
+const cleanText = (t) => String(t ?? '').replace(/\s*[|\r\n]+\s*/g, ' / ').replace(/\s+/g, ' ').trim();
+function opSetLoc(ctx, text) {
+    const val = String(text ?? '').replace(/[\r\n]+/g, ' ').trim(), line = 'LOC: ' + val;
+    const i = ctx.lines.findIndex(l => l != null && l.trim().startsWith('LOC:'));
+    if (i < 0) { ctx.lines.unshift(line); return true; }
+    if (ctx.lines[i].trim() === line) return false;
+    ctx.lines[i] = line; return true;
+}
+function opSetGender(ctx, name, text) {
+    const i = lineIdx(ctx.lines, ['PRESENT:'], 1, name); if (i < 0) return false;
+    const f = lineFields(ctx.lines[i]), v = cleanText(text) || '❔';
+    if (f[0] === v) return false;
+    f[0] = v; ctx.lines[i] = 'PRESENT: ' + f.join(' | '); return true;
+}
+function opSetOffText(ctx, name, field, text) {
+    const i = lineIdx(ctx.lines, ['ELSEWHERE:'], 1, name); if (i < 0) return false;
+    const f = lineFields(ctx.lines[i]); if (f.length < 5) return false;
+    const k = field === 'loc' ? 2 : 3, v = cleanText(text) || '-';
+    if (f[k] === v) return false;
+    f[k] = v; ctx.lines[i] = 'ELSEWHERE: ' + f.join(' | '); return true;
+}
+function relTriples(f) { const t = []; for (let k = 6; k + 2 < f.length; k += 3) if (f[k] && f[k] !== '-') t.push([f[k], f[k + 1], f[k + 2]]); return t; }
+function relRebuild(prefix, f, triples) { const slots = []; for (let k = 0; k < 4; k++) slots.push(...(triples[k] || ['-', '-', '-'])); return `${prefix} ${[...f.slice(0, 6), ...slots].join(' | ')}`; }
+function relLine(ctx, name) {
+    const i = lineIdx(ctx.lines, ['REL:', 'RELATIONSHIP:'], 0, name); if (i < 0) return null;
+    const f = lineFields(ctx.lines[i]); if (f.length < 6) return null;
+    return { i, f, prefix: ctx.lines[i].trim().startsWith('RELATIONSHIP:') ? 'RELATIONSHIP:' : 'REL:' };
+}
+const keepChange = (oldTxt, newName) => { const m = String(oldTxt || '').match(CHANGE_RE); return (cleanText(newName) + (m ? ' ' + m[0].trim() : '')).trim(); };
+function opSetRelText(ctx, name, field, text) {          // field: name | valence | dur | stage
+    const r = relLine(ctx, name); if (!r) return false;
+    const { f } = r; let k, v;
+    if (field === 'name')         { k = 2; v = keepChange(f[2], text); if (!cleanText(text)) return false; }
+    else if (field === 'valence') { k = 3; v = String(text) === '-' ? '-' : '+'; }
+    else if (field === 'dur')     { k = 4; v = cleanText(text) || '-'; }
+    else if (field === 'stage')   { k = 5; v = cleanText(text) || '-'; }
+    else return false;
+    if (f[k] === v) return false;
+    f[k] = v; ctx.lines[r.i] = relRebuild(r.prefix, f, relTriples(f));
+    return true;
+}
+function opSetRelMoment(ctx, name, mi, field, text) {    // field: emoji | name | val
+    const r = relLine(ctx, name); if (!r) return false;
+    const tr = relTriples(r.f); if (mi < 0 || mi >= tr.length) return false;
+    const t = tr[mi], old = t.slice();
+    if (field === 'emoji') { const v = cleanText(text); if (!v) return false; t[0] = v; }
+    else if (field === 'name') { if (!cleanText(text)) return false; t[1] = keepChange(t[1], text); }
+    else if (field === 'val') { const n = parseFloat(text); if (!isFinite(n)) return false; t[2] = String(Math.round(clampTo(n, 0, 100))); }
+    else return false;
+    if (old.join('|') === t.join('|')) return false;
+    ctx.lines[r.i] = relRebuild(r.prefix, r.f, tr);
+    delete ctx.meta.mom[relKey(name)];                    // the fade memory restarts from what was typed
+    return true;
+}
+function opAddRelMoment(ctx, name) {
+    const r = relLine(ctx, name); if (!r) return false;
+    const tr = relTriples(r.f); if (tr.length >= 4) return false;
+    tr.push(['😐', 'New feeling (0)', '10']);
+    ctx.lines[r.i] = relRebuild(r.prefix, r.f, tr);
+    delete ctx.meta.mom[relKey(name)];
+    return true;
+}
+function opSetSsr(ctx, name, field, text) {              // field: val | boost
+    const i = lineIdx(ctx.lines, ['SSR:'], 0, name); if (i < 0) return false;
+    const f = lineFields(ctx.lines[i]); if (f.length < 6) return false;
+    const vit = ctx.meta.vit[relKey(name)];
+    if (field === 'val') {
+        const n = parseFloat(text); if (!isFinite(n)) return false;
+        const v = clampTo(n, 0, 100);
+        if (Math.abs((parseFloat(f[3]) || 0) - v) < 0.01) return false;
+        f[3] = fmtNum(v); f[5] = '—'; if (vit?.ssr) vit.ssr.val = v;
+    } else if (field === 'boost') {
+        const v = cleanText(text) || '-';
+        if ((f[7] || '-') === v) return false;
+        while (f.length < 8) f.push('-');
+        f[7] = v; if (vit?.ssr) vit.ssr.boost = v;
+    } else return false;
+    ctx.lines[i] = 'SSR: ' + f.join(' | '); return true;
+}
+
 // ── overlay rendering helpers ──
 function clockLabel(meta) {
     const c = meta?.clock; if (c == null || !isFinite(c)) return '';
@@ -2412,6 +2549,14 @@ function onOverlayEditChange(e) {
     else if (kind === 'condition') editLatestSnapshot(c => opSetOnscreenText(c, agent, 'condition', el.value));
     else if (kind === 'relmain') editLatestSnapshot(c => opSetRelMain(c, agent, num));
     else if (kind === 'plan') editLatestSnapshot(c => opSetPlan(c, +el.dataset.pi, el.dataset.pf, el.value));
+    else if (kind === 'loc') editLatestSnapshot(c => opSetLoc(c, el.value));
+    else if (kind === 'gender') editLatestSnapshot(c => opSetGender(c, agent, el.value));
+    else if (kind === 'off-loc') editLatestSnapshot(c => opSetOffText(c, agent, 'loc', el.value));
+    else if (kind === 'off-act') editLatestSnapshot(c => opSetOffText(c, agent, 'act', el.value));
+    else if (kind === 'rel-name' || kind === 'rel-valence' || kind === 'rel-dur' || kind === 'rel-stage') editLatestSnapshot(c => opSetRelText(c, agent, kind.slice(4), el.value));
+    else if (kind.startsWith('rel-itm-')) editLatestSnapshot(c => opSetRelMoment(c, agent, +el.dataset.mi, kind.slice(8), el.value));
+    else if (kind === 'ssr-val') editLatestSnapshot(c => opSetSsr(c, agent, 'val', el.value));
+    else if (kind === 'ssr-boost') editLatestSnapshot(c => opSetSsr(c, agent, 'boost', el.value));
 }
 
 function onOverlayEditClick(e) {
@@ -2426,6 +2571,7 @@ function onOverlayEditClick(e) {
     if (act === 'del-rel') editLatestSnapshot(c => opDeleteRel(c, agent));
     else if (act === 'del-off') editLatestSnapshot(c => opDeleteOffscreen(c, agent));
     else if (act === 'del-moment') editLatestSnapshot(c => opDeleteRelMoment(c, agent, +el.dataset.mi));
+    else if (act === 'add-moment') editLatestSnapshot(c => opAddRelMoment(c, agent));
     else if (act === 'del-plan') editLatestSnapshot(c => opDeletePlan(c, +el.dataset.pi));
     else if (act === 'add-plan') editLatestSnapshot(c => opAddPlan(c));
     else if (act === 'unignore') { removeIgnore(el.dataset.kind, agent); updateOverlayContent(getChatId()); }
@@ -2950,8 +3096,11 @@ function abortTrackerUpdate() {
 
 async function deleteLastTracker() {
     const chatId   = getChatId();
+    const had      = getSnapshots(chatId).length;
     const restored = restorePreviousSnapshot(chatId);
-    if (!restored) {
+    if (!restored && had) {
+        toastr.warning('That was the only snapshot, so the tracker is now empty. Press “Undo Restore” to bring it back.', '', { timeOut: 5000 });
+    } else if (!restored) {
         toastr.info('No previous snapshot to restore to.');
     } else {
         toastr.success('Restored previous tracker snapshot.');
@@ -2981,6 +3130,7 @@ function setLoadingState(loading) {
     $('#enaenn-overlay-refresh').prop('disabled', loading);
     $('#enaenn-overlay-restore').prop('disabled', loading);
     $('#enaenn-overlay-stop').toggle(loading);
+    updateRestoreUndoUI();
 }
 
 // ─── SETTINGS UI ──────────────────────────────────────────────────────────────
@@ -3181,9 +3331,10 @@ const SETTINGS_HTML = `
 
       <hr />
 
-      <div class="flex-container flexGap5">
-        <button id="enaennTracker_refreshBtn" class="menu_button flex1">🔄 Refresh Tracker</button>
-        <button id="enaennTracker_regenBtn"   class="menu_button flex1" title="Undo the last tracker update (restore previous snapshot).">♻️ Restore Previous</button>
+      <div class="enaenn-actions">
+        <button id="enaennTracker_refreshBtn" class="menu_button">🔄 Refresh Tracker</button>
+        <button id="enaennTracker_regenBtn"   class="menu_button" title="Undo the last tracker update (restore previous snapshot).">♻️ Restore Previous</button>
+        <button id="enaennTracker_undoRestoreBtn" class="menu_button" title="Bring back the snapshot that “Restore Previous” just removed." disabled>↪️ Undo Restore</button>
         <button id="enaennTracker_stopBtn"    class="menu_button" title="Abort the tracker generation currently in progress." disabled>⏹️ Stop</button>
         <button id="enaennTracker_clearBtn"   class="menu_button" title="Clear all snapshots for this chat.">🗑️ Clear State</button>
       </div>
@@ -3354,6 +3505,7 @@ function bindUI() {
 
     $('#enaennTracker_refreshBtn').on('click', () => updateTracker());
     $('#enaennTracker_regenBtn').on('click',   async () => { await deleteLastTracker(); });
+    $('#enaennTracker_undoRestoreBtn').on('click', () => undoRestore());
     $('#enaennTracker_stopBtn').on('click',    () => abortTrackerUpdate());
     $('#enaennTracker_clearBtn').on('click', () => {
         const chatId = getChatId();
@@ -3440,6 +3592,7 @@ jQuery(async () => {
     updateOverlayContent(chatId);
     toggleOverlay(S().overlayVisible);
     updateBackupStatusUI();
+    updateRestoreUndoUI();
 
     // Restore last-gen stats if we have them (they don't survive page reload
     // since they're not in DEFAULT_SETTINGS persistence — that's intentional)
@@ -3472,6 +3625,7 @@ jQuery(async () => {
         restoreTrackerStateFromLocalStorageIfNeeded(chatId);
         updateOverlayContent(chatId);
         clearGenStats();
+        updateRestoreUndoUI();
         _wiCache = [];              // stale WI entries from previous chat are meaningless
         _wiCacheTimestamp = 0;
         refreshExtensionPrompt();
@@ -3483,5 +3637,5 @@ jQuery(async () => {
         setTimeout(populateProfileDropdown, 500);
     });
 
-    console.log('[enaennTracker] Loaded successfully. Build: 1.4.2-clockfix');
+    console.log('[enaennTracker] Loaded successfully. Build: 1.4.4-ui');
 });

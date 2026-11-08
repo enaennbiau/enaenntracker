@@ -842,3 +842,42 @@ input.enaenn-edit-main { width: 64px; text-align: right; }
     .enaenn-edit-input, .enaenn-edit-btn, .enaenn-del { min-height: 32px; }
     .enaenn-tab-labels label { padding-top: 7px; padding-bottom: 7px; }
 }
+
+/* ── extra edit-mode inputs ─────────────────────── */
+.enaenn-edit-loc { width: calc(100% - 90px); }
+input.enaenn-edit-emoji { width: 34px; text-align: center; flex-shrink: 0; padding: 2px; }
+input.enaenn-edit-mainname { flex: 1 1 90px; min-width: 70px; }
+input.enaenn-edit-itmname { flex: 1 1 80px; min-width: 60px; }
+input.enaenn-edit-itm { width: 52px; text-align: right; flex-shrink: 0; }
+input.enaenn-edit-dur { width: 90px; }
+input.enaenn-edit-stage { width: 100%; max-width: 100%; margin: 2px 0; }
+.enaenn-rel-moment-edit { display: inline-flex; gap: 3px; align-items: center; flex: 1 1 auto; min-width: 0; }
+.enaenn-rel-edit { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+input.enaenn-edit-offloc, input.enaenn-edit-offact { width: 38%; min-width: 80px; }
+
+/* ── Settings panel: buttons never overflow their borders ───────── */
+#enaennTracker_root .menu_button {
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+    line-height: 1.25;
+    height: auto;
+    min-height: 32px;
+    min-width: 0;
+    box-sizing: border-box;
+}
+#enaennTracker_root .flex-container { flex-wrap: wrap; }
+#enaennTracker_root .flex-container > .menu_button { min-width: 0; }
+#enaennTracker_root .enaenn-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+#enaennTracker_root .enaenn-actions .menu_button {
+    width: 100%;
+    margin: 0;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
