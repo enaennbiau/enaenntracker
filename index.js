@@ -1161,6 +1161,8 @@ function validateProfile(f, name, old) {
     const term = /^(term|break)$/i.test(f[3] || '') ? f[3].toLowerCase() : '-';
     return { name, arch: String(f[1] || 'other').slice(0, 24), sleep, term, blocks: parseBlocks(f[4]), note: String(f[5] || '').replace(/\|/g, '/').slice(0, 120) };
 }
+const LONG_SKIP_MIN   = 12 * 60;   // an on-screen gap longer than this is a time skip: the schedule/routine covers it
+const SCENE_TAIL_MIN  = 30;        // …except for the last 30 min, which are simulated as the scene (reported activity)
 const DEFAULT_PROFILE = { name: '', arch: 'default', sleep: DEFAULT_SLEEP, term: '-', blocks: [], note: '' };
 function profileLine(p) {
     const days = (d) => d.length === 7 ? 'daily' : d.join(',') === '1,2,3,4,5' ? 'Mon-Fri' : d.map(x => DOW_NAMES[x]).join(',');
@@ -1288,7 +1290,7 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
     CUR_DOW_SHIFT = timing.dowShift || 0;
     const prevClock = prevMeta.clock ?? clock;
     try {
-        console.info(`[enaennTracker 1.4.4-ui] clock: message header ${ctx?.header ? hhmm(ctx.header.start) + '—' + hhmm(ctx.header.end) : 'NOT FOUND'} | stored ${prevMeta.clock != null ? clockLabel(prevMeta) : 'none'} → now ${clockLabel({ clock, dowShift: timing.dowShift })} (+${Math.round(elapsed)} min, source: ${timing.src})`);
+        console.info(`[enaennTracker 1.4.5-skipfix] clock: message header ${ctx?.header ? hhmm(ctx.header.start) + '—' + hhmm(ctx.header.end) : 'NOT FOUND'} | stored ${prevMeta.clock != null ? clockLabel(prevMeta) : 'none'} → now ${clockLabel({ clock, dowShift: timing.dowShift })} (+${Math.round(elapsed)} min, source: ${timing.src})`);
     } catch { /* logging only */ }
     const turn = (prevMeta.turn || 0) + 1;
     const userNames = ctx?.userNames || [];
@@ -1401,9 +1403,18 @@ function applySystemCalculations(rawText, prevSnap, s, ctx) {
             if (!fresh) {
                 // The reported activity describes the state NOW (e.g. "normal" right after waking up),
                 // so it must not be applied to the whole elapsed period: a 6h sleep would be charged as 6h of decay.
-                const t0 = Math.min(Math.max(vit.t ?? clock, clock - MAX_ELAPSED_MIN), clock), span = clock - t0;
-                const wasAsleep = vit.act === 'sleep';
-                let sleepMin = ev.sleptMin || 0;
+                let t0 = Math.min(Math.max(vit.t ?? clock, clock - MAX_ELAPSED_MIN), clock), span = clock - t0;
+                // TIME SKIP (long gap before this scene): the agent lived their life in between — meals, toilet, sleep, showers
+                // by their schedule — so only the last stretch counts as "the scene". Without this a 2-week skip was simulated as
+                // 2 weeks of standing around: food 0, energy 0, thirst 100, bladder 100.
+                const longSkip = span > LONG_SKIP_MIN;
+                if (longSkip) {
+                    const sceneFrom = clock - SCENE_TAIL_MIN;
+                    advanceVitals(vit, t0, sceneFrom, (tt) => actFromSlot(slotAt(prof, tt)), makeRoutine(vit.name, prof, new Set()));
+                    t0 = sceneFrom; span = clock - t0;
+                }
+                const wasAsleep = !longSkip && vit.act === 'sleep';
+                let sleepMin = longSkip ? 0 : (ev.sleptMin || 0);
                 if (!sleepMin && wasAsleep && act !== 'sleep') sleepMin = Math.min(span, 10 * 60);   // was asleep at the last update, awake now: assume a normal night
                 sleepMin = Math.min(sleepMin, span);
                 const sleepFrom = wasAsleep ? t0 : clock - sleepMin;                                  // sleep right after the last update, or right before waking
@@ -3637,5 +3648,5 @@ jQuery(async () => {
         setTimeout(populateProfileDropdown, 500);
     });
 
-    console.log('[enaennTracker] Loaded successfully. Build: 1.4.4-ui');
+    console.log('[enaennTracker] Loaded successfully. Build: 1.4.5-skipfix');
 });
